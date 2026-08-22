@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Send, Bot, Terminal, ShoppingBag, RefreshCw, Sparkles, User, Play, CheckCircle2, ShieldAlert } from "lucide-react";
+import { Send, Bot, Terminal, ShoppingBag, RefreshCw, Sparkles, User, Play, CheckCircle2, ShieldAlert, X } from "lucide-react";
 import { CartQuote } from "@/lib/agent-service";
 import { formatCurrency } from "@/lib/utils";
 
@@ -24,7 +24,7 @@ export const ChatWorkspace: React.FC = () => {
   const [userMessages, setUserMessages] = useState<Message[]>([
     {
       sender: "clerk",
-      content: "Yo! Welcome to ZeroClick. I'm the store clerk. What drop are you looking for today?",
+      content: "Yo! Welcome to the storefront chat. I'm the AI Clerk. What drop are you looking for today?",
     },
   ]);
   const [userInput, setUserInput] = useState("");
@@ -222,7 +222,7 @@ export const ChatWorkspace: React.FC = () => {
           <div className="flex items-center space-x-2">
             <Bot className="w-5 h-5 text-foreground" />
             <h2 className="font-mono text-sm font-black uppercase tracking-wider text-foreground">
-              A2A Simulation Panel (AI Buyer ↔ AI Clerk)
+              ZeroClick Autonomous Panel (AI Buyer ↔ AI Clerk)
             </h2>
           </div>
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -368,7 +368,7 @@ export const ChatWorkspace: React.FC = () => {
           <div className="flex items-center space-x-2">
             <User className="w-5 h-5 text-foreground" />
             <h2 className="font-mono text-sm font-black uppercase tracking-wider text-foreground">
-              User Chat Panel (You ↔ AI Store Clerk)
+              Conversational Commerce Panel (You ↔ AI Store Clerk)
             </h2>
           </div>
           <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
