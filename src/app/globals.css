@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root,
+  .cream {
+    --background: 27 30% 90%;
+    --foreground: 0 0% 0%;
+    --card: 27 30% 90%;
+    --card-foreground: 0 0% 0%;
+    --popover: 27 30% 90%;
+    --popover-foreground: 0 0% 0%;
+    --primary: 0 0% 0%;
+    --primary-foreground: 27 30% 90%;
+    --secondary: 27 20% 83%;
+    --secondary-foreground: 0 0% 0%;
+    --muted: 27 15% 78%;
+    --muted-foreground: 0 0% 30%;
+    --accent: 27 20% 83%;
+    --accent-foreground: 0 0% 0%;
+    --destructive: 0 100% 50%;
+    --destructive-foreground: 27 30% 90%;
+    --border: 0 0% 0% / 0.15;
+    --input: 0 0% 0% / 0.15;
+    --ring: 0 0% 0%;
+    --radius: 0rem;
+  }
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* =============================================
+   MARQUEE / TICKER TAPE
+   ============================================= */
+@keyframes marquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+@keyframes marqueeReverse {
+  0%   { transform: translateX(-50%); }
+  100% { transform: translateX(0); }
+}
+
+.marquee-track {
+  display: flex;
+  white-space: nowrap;
+  animation: marquee 22s linear infinite;
+  will-change: transform;
+}
+
+.marquee-track:hover {
+  animation-play-state: paused;
+}
+
+/* =============================================
+   NAV - link underline swipe
+   ============================================= */
+.nav-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+}
+.nav-link::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0;
+  width: 100%; height: 1px;
+  background: currentColor;
+  transform: translateX(-101%);
+  transition: transform 0.3s cubic-bezier(0.16,1,0.3,1);
+}
+.nav-link:hover::after {
+  transform: translateX(0);
+}
+
+/* =============================================
+   PRODUCT CARDS - hover reveal overlay
+   ============================================= */
+.product-card-image {
+  transition: transform 0.6s cubic-bezier(0.16,1,0.3,1);
+}
+.product-card:hover .product-card-image {
+  transform: scale(1.05);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(var(--secondary));
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--foreground) / 0.3);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--foreground) / 0.6);
+}
