@@ -30,6 +30,14 @@ export const ChatWorkspace: React.FC = () => {
   const [userInput, setUserInput] = useState("");
   const [userLoading, setUserLoading] = useState(false);
   const [userCart, setUserCart] = useState<CartQuote | null>(null);
+  
+  // Payment rail status
+  const [checkoutStatus, setCheckoutStatus] = useState<{
+    status: "idle" | "loading" | "success" | "error";
+    error?: string;
+    orderId?: string;
+    isA2a?: boolean;
+  }>({ status: "idle" });
 
   const a2aMsgEndRef = useRef<HTMLDivElement>(null);
   const userMsgEndRef = useRef<HTMLDivElement>(null);
@@ -192,14 +200,54 @@ export const ChatWorkspace: React.FC = () => {
     }
   };
 
-  const handleApprove = () => {
+  const executeCheckout = async (cartData: CartQuote, budgetCapPaise: number, isA2a: boolean) => {
+    setCheckoutStatus({ status: "loading", isA2a });
+    setA2aLogs((p) => [...p, `💳 [PAYMENT] Sending order to A2A Checkout Gateway...`]);
+
+    try {
+      const res = await fetch("/api/razorpay/order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: cartData.items.map((i) => ({ id: i.id, quantity: i.quantity, size: i.size, color: i.color })),
+          budget_cap_paise: budgetCapPaise,
+          expected_total_paise: cartData.total_price_paise,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.status === "success") {
+        setCheckoutStatus({ status: "success", orderId: data.order_id, isA2a });
+        setA2aLogs((p) => [
+          ...p,
+          `🎉 [SUCCESS] Razorpay Order created: ${data.order_id}`,
+          `💳 [PAYMENT] Rails complete. Status: PAID (Simulated/Test Mode).`,
+        ]);
+        return data;
+      } else {
+        setCheckoutStatus({ status: "error", error: `${data.error}: ${data.details || ""}`, isA2a });
+        setA2aLogs((p) => [
+          ...p,
+          `❌ [FAIL] Checkout Gateway declined transaction: ${data.error}`,
+          `❌ [REASON] ${data.details || ""}`,
+        ]);
+        return null;
+      }
+    } catch (err: any) {
+      const errMsg = err.message || "Network Error";
+      setCheckoutStatus({ status: "error", error: errMsg, isA2a });
+      setA2aLogs((p) => [...p, `❌ [FAIL] Gateway connection error: ${errMsg}`]);
+      return null;
+    }
+  };
+
+  const handleApprove = async () => {
     setGateApproved(true);
-    setA2aLogs((p) => [
-      ...p,
-      "🔐 [SECURITY] Transaction approved by user signature.",
-      "💳 [PAYMENT] Initiating Razorpay A2A payment rails...",
-      "🎉 [SUCCESS] Payment successful! Order #ZP-7890 created successfully.",
-    ]);
+    setA2aLogs((p) => [...p, "🔐 [SECURITY] Transaction approved by user signature."]);
+    if (a2aCart) {
+      await executeCheckout(a2aCart, a2aBudget * 100, true);
+    }
   };
 
   const handleDecline = () => {
@@ -354,6 +402,20 @@ export const ChatWorkspace: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              {checkoutStatus.status !== "idle" && checkoutStatus.isA2a && (
+                <div className="col-span-1 md:col-span-2 mt-2 pt-2 border-t border-border font-mono text-[10px] uppercase font-bold">
+                  {checkoutStatus.status === "loading" && (
+                    <span className="text-muted-foreground animate-pulse">⏳ Processing payment rails checkout...</span>
+                  )}
+                  {checkoutStatus.status === "success" && (
+                    <span className="text-emerald-600">✅ Rails Success! Order ID: {checkoutStatus.orderId} created.</span>
+                  )}
+                  {checkoutStatus.status === "error" && (
+                    <span className="text-rose-600">❌ Rails Failed: {checkoutStatus.error}</span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -430,11 +492,26 @@ export const ChatWorkspace: React.FC = () => {
             </div>
 
             <button
-              onClick={() => alert(`Creating Razorpay order for ${formatCurrency(userCart.total_price_paise)}... (Triggers checkout guardrails)`)}
-              className="w-full mt-2 bg-foreground text-background hover:opacity-85 py-1.5 text-xs font-mono font-black uppercase tracking-wider border border-foreground transition-opacity"
+              onClick={() => executeCheckout(userCart, 5000 * 100, false)}
+              disabled={checkoutStatus.status === "loading"}
+              className="w-full mt-2 bg-foreground text-background hover:opacity-85 py-1.5 text-xs font-mono font-black uppercase tracking-wider border border-foreground transition-opacity disabled:opacity-50"
             >
-              Secure Checkout
+              {checkoutStatus.status === "loading" && !checkoutStatus.isA2a ? "Processing..." : "Secure Checkout"}
             </button>
+
+            {checkoutStatus.status !== "idle" && !checkoutStatus.isA2a && (
+              <div className="mt-2 pt-2 border-t border-border font-mono text-[10px] uppercase font-bold text-center">
+                {checkoutStatus.status === "loading" && (
+                  <span className="text-muted-foreground animate-pulse">⏳ Processing payment...</span>
+                )}
+                {checkoutStatus.status === "success" && (
+                  <span className="text-emerald-600">✅ Order ID: {checkoutStatus.orderId} Created!</span>
+                )}
+                {checkoutStatus.status === "error" && (
+                  <span className="text-rose-600">❌ Failed: {checkoutStatus.error}</span>
+                )}
+              </div>
+            )}
           </div>
         )}
 
