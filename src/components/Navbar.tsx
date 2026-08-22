@@ -1,9 +1,9 @@
 "use client";
 
 import React from "react";
-import { Bot, ShoppingBag, ArrowUpRight } from "lucide-react";
+import { Bot, ShoppingBag, ArrowUpRight, MessageSquare } from "lucide-react";
 
-export type ViewMode = "store" | "agent";
+export type ViewMode = "store" | "chat" | "agent";
 
 interface NavbarProps {
   viewMode: ViewMode;
@@ -51,6 +51,18 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 <ShoppingBag className="w-3.5 h-3.5" />
                 <span>Store</span>
+              </button>
+
+              <button
+                onClick={() => onViewModeChange("chat")}
+                className={`flex items-center space-x-1.5 px-3 py-1 text-xs font-mono font-bold uppercase tracking-wider transition-colors ${
+                  viewMode === "chat"
+                    ? "bg-foreground text-background"
+                    : "text-foreground hover:opacity-70"
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>Chat</span>
               </button>
 
               <button

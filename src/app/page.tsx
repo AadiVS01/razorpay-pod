@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { Navbar, ViewMode } from "@/components/Navbar";
 import { StorefrontView } from "@/components/StorefrontView";
 import { AgentApiViewer } from "@/components/AgentApiViewer";
-import { ChatDrawer } from "@/components/ChatDrawer";
+import { ChatWorkspace } from "@/components/ChatWorkspace";
 import { Product } from "@/types/catalog";
 
 export default function HomePage() {
@@ -83,6 +83,10 @@ export default function HomePage() {
               onInStockOnlyChange={setInStockOnly}
             />
           </div>
+        ) : viewMode === "chat" ? (
+          <div className="animate-in fade-in duration-200">
+            <ChatWorkspace />
+          </div>
         ) : (
           <div className="animate-in fade-in duration-200">
             <AgentApiViewer
@@ -120,9 +124,6 @@ export default function HomePage() {
 
         </div>
       </footer>
-
-      {/* Floating Chat Drawer Console */}
-      <ChatDrawer />
 
     </div>
   );
