@@ -271,9 +271,9 @@ export const ChatWorkspace: React.FC = () => {
         </div>
 
         {/* Messages Stream */}
-        <div className="flex-1 overflow-y-auto border border-border bg-muted/10 p-4 space-y-4 max-h-[250px] mb-4 min-h-[160px]">
+        <div className="flex-1 overflow-y-auto border border-border bg-muted/10 p-4 space-y-4 max-h-[380px] mb-4 min-h-[280px]">
           {a2aMessages.length === 0 && !a2aLoading && (
-            <div className="text-center py-12 text-muted-foreground font-mono text-xs uppercase font-bold">
+            <div className="text-center py-16 text-muted-foreground font-mono text-xs uppercase font-bold">
               Simulation idle. Configure objectives above and run.
             </div>
           )}
@@ -307,28 +307,6 @@ export const ChatWorkspace: React.FC = () => {
             </div>
           )}
           <div ref={a2aMsgEndRef} />
-        </div>
-
-        {/* Real-time Telemetry logs */}
-        <div className="h-[120px] bg-[#05070B] text-gray-400 p-3 overflow-y-auto font-mono text-[9px] border border-foreground leading-normal shrink-0 mb-4">
-          <div className="text-[#38BDF8] font-bold uppercase border-b border-gray-800 pb-1 flex items-center space-x-1 mb-1 text-[10px]">
-            <Terminal className="w-3.5 h-3.5" />
-            <span>Agentic Telemetry Flight Logs</span>
-          </div>
-          {a2aLogs.map((l, index) => (
-            <div key={index} className="tracking-tight">
-              {l.includes("✅") || l.includes("[SUCCESS]") ? (
-                <span className="text-emerald-400 font-bold">{l}</span>
-              ) : l.includes("❌") || l.includes("[ERROR]") ? (
-                <span className="text-rose-400 font-bold">{l}</span>
-              ) : l.includes("⚠️") || l.includes("[GATE]") ? (
-                <span className="text-amber-400 font-bold">{l}</span>
-              ) : (
-                l
-              )}
-            </div>
-          ))}
-          <div ref={a2aLogEndRef} />
         </div>
 
         {/* Transaction Gating Panel (Human Approval) */}
