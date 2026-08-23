@@ -40,12 +40,16 @@ async function fallbackAgentChat(messages: ChatMessage[], products: Product[]): 
   const activeTee = products.find(p => p.slug === "argentina-sun-of-may-tee");
   const transformedTee = activeTee ? transformProductForAgent(activeTee) : null;
 
-  logs.push(`[CATALOG] Found ${products.length} active products in catalog.`);
+  logs.push(`[CATALOG] Found ${products.length} active products in catalog.`);  const triggerPurchase = ["buy", "order", "add", "gimme", "give", "get", "checkout", "purchase"];
+  const triggerBundle = ["bundle", "pants", "upsell", "deal", "discount"];
+  const triggerVariant = ["size", "color", "variant"];
+  const triggerRecommend = ["tee", "tshirt", "t-shirt", "recommend", "suggest", "item", "product", "dress"];
 
-  if (lastUserMessage.includes("buy") || lastUserMessage.includes("order") || lastUserMessage.includes("add")) {
+  const hasWord = (triggers: string[]) => triggers.some(t => lastUserMessage.includes(t));
+
+  if (hasWord(triggerPurchase)) {
     logs.push("[INTENT] Detected purchase/cart request.");
     if (activeTee) {
-      // Formulate a structured cart quote
       const pricePaise = activeTee.price;
       cart = {
         items: [
@@ -64,9 +68,9 @@ async function fallbackAgentChat(messages: ChatMessage[], products: Product[]): 
       
       logs.push(`[CART] Built machine cart. Total: ₹${Math.round(pricePaise / 100)}`);
       
-      reply = `Adding the **Argentina Sun Of May Tee** (Size: L, Color: White) to your cart. 
+      reply = `I have added the **Argentina Sun Of May Tee** (Size: L, Color: White) to your cart. 
 
-Here is your structured agent checkout quote:
+Here is the secure cart quote for this drop:
 \`\`\`json
 {
   "cart": {
@@ -86,17 +90,17 @@ Here is your structured agent checkout quote:
 }
 \`\`\`
 
-Ready to checkout? We can verify payment bounds next!`;
+Ready to check out? Click "Secure Checkout" in the cart receipts block!`;
     } else {
       reply = "Sorry, we don't have any items in stock right now.";
     }
-  } else if (lastUserMessage.includes("bundle") || lastUserMessage.includes("pants") || lastUserMessage.includes("upsell") || lastUserMessage.includes("deal")) {
+  } else if (hasWord(triggerBundle)) {
     logs.push("[INTENT] Detected bundle query.");
     reply = `Yes! We offer a special **A2A bundle deal** for the **Argentina Sun Of May Tee**:
 - Add matching **Sweatpants** to your order and receive a **15% combo discount**!
 
 Would you like me to create a bundled quote for you?`;
-  } else if (lastUserMessage.includes("size") || lastUserMessage.includes("color") || lastUserMessage.includes("variant")) {
+  } else if (hasWord(triggerVariant)) {
     logs.push("[INTENT] Detected variant query.");
     if (activeTee) {
       reply = `The **Argentina Sun Of May Tee** is available in:
@@ -107,19 +111,29 @@ Which variants should I add to the cart?`;
     } else {
       reply = "Variants are currently unavailable.";
     }
-  } else {
-    logs.push("[INTENT] Parsed general greeting / product recommendation request.");
+  } else if (hasWord(triggerRecommend)) {
+    logs.push("[INTENT] Detected product inquiry / recommendation request.");
     if (activeTee) {
-      reply = `Yo! Welcome to **ZeroClick**. I'm your automated A2A Sales Assistant.
-
-I recommend our featured drop:
+      reply = `I recommend our active drop:
 *   **${activeTee.name}** (₹${Math.round(activeTee.price / 100)})
-    *Category: ${activeTee.category}*
     *AI Summary: ${activeTee.description?.substring(0, 100)}...*
 
 You can ask me to **"Buy this tee"**, ask about **"sizes"**, or check out the **"bundle deal"**!`;
     } else {
-      reply = "Yo! Welcome to ZeroClick. The catalog is currently being loaded.";
+      reply = "The catalog is currently being loaded.";
+    }
+  } else {
+    logs.push("[INTENT] Parsed general greeting.");
+    if (activeTee) {
+      reply = `Yo! Welcome to the storefront chat. I'm your AI Sales Assistant.
+
+I recommend our featured drop:
+*   **${activeTee.name}** (₹${Math.round(activeTee.price / 100)})
+    *AI Summary: ${activeTee.description?.substring(0, 100)}...*
+
+Let me know if you want to **"Buy this tee"**, check out the **"bundle deal"**, or browse **"sizes"**!`;
+    } else {
+      reply = "Yo! Welcome to the storefront chat. The catalog is currently loading.";
     }
   }
 

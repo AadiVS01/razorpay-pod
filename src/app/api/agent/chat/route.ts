@@ -17,6 +17,13 @@ export async function POST(request: NextRequest) {
 
     const result = await getAgentChatResponse(messages);
 
+    // Print logs to server terminal console for developer visibility
+    console.log("\n=======================================================");
+    console.log("💬 [A2A CHAT DIALOGUE] Telemetry Log Stream");
+    console.log("=======================================================");
+    result.logs.forEach(log => console.log(log));
+    console.log("=======================================================\n");
+
     return NextResponse.json(result, {
       status: 200,
       headers: {
