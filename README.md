@@ -107,3 +107,33 @@ curl -X POST http://localhost:3000/api/razorpay/order \
   }'
 ```
 *   **Expected Response:** `422 Unprocessable Entity` containing `BUDGET_CAP_EXCEEDED` error status.
+
+---
+
+## 🤖 Model Context Protocol (MCP) Tool Integration
+
+ZeroClick behaves natively as an **MCP Tool Provider**, exposing catalog, negotiation, and payment endpoints as tools that an LLM client (like Claude Desktop or custom agents) can invoke.
+
+To plug ZeroClick as a tool provider into your MCP client (e.g. Claude Desktop), add the following to your `claude_desktop_config.json` schema:
+
+```json
+{
+  "mcpServers": {
+    "zeroclick-gateway": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-http"
+      ],
+      "env": {
+        "URL": "http://localhost:3000/api/agent/catalog"
+      }
+    }
+  }
+}
+```
+
+### Exposed MCP Tools
+1.  **`get_catalog`** (`GET /api/agent/catalog`): Discovers active drops, sizes, stock, and bundle rules.
+2.  **`negotiate_order`** (`POST /api/agent/chat`): Handshakes intent and applies A2A bundle deals to generate a machine cart receipt.
+3.  **`execute_checkout`** (`POST /api/razorpay/order`): Enforces pre-authorized budget cap and atomic stock check before issuing the Razorpay Order ID.
