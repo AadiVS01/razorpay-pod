@@ -151,11 +151,31 @@ export async function POST(request: NextRequest) {
     console.log(`[GUARDRAIL] [BUDGET] Client pre-authorized cap: ₹${(secureCap / 100).toFixed(2)}`);
     if (pricing.total_paise > secureCap) {
       console.error(`❌ [SECURITY] [BUDGET_CAP_EXCEEDED] total ₹${(pricing.total_paise / 100).toFixed(2)} exceeds cap ₹${(secureCap / 100).toFixed(2)}`);
+      
+      const dbConn = getAdminSupabase() || supabasePublic;
+      let alternatives: any[] = [];
+      if (dbConn) {
+        const { data: cheaperProducts } = await dbConn
+          .from("products")
+          .select("id, name, price")
+          .lte("price", secureCap)
+          .gt("stock", 0)
+          .limit(3);
+        if (cheaperProducts) {
+          alternatives = cheaperProducts.map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            price_paise: p.price,
+          }));
+        }
+      }
+
       return NextResponse.json(
         {
           status: "error",
           error: "BUDGET_CAP_EXCEEDED",
-          details: `Order total of ₹${(pricing.total_paise / 100).toFixed(2)} exceeds your pre-authorized budget cap of ₹${(secureCap / 100).toFixed(2)}.`
+          details: `Order total of ₹${(pricing.total_paise / 100).toFixed(2)} exceeds your pre-authorized budget cap of ₹${(secureCap / 100).toFixed(2)}.`,
+          alternatives,
         },
         { status: 422 }
       );

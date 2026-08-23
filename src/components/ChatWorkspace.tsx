@@ -156,18 +156,9 @@ export const ChatWorkspace: React.FC = () => {
         "📊 [NEGOTIATION] Evaluating upsell bundle: Argentina Tee + Heavyweight Sweatpants.",
       ]);
 
-      if (data.cart) {
-        setA2aCart(data.cart);
-        setA2aLogs((p) => [
-          ...p,
-          `📊 [VALIDATION] Combined total is ${formatCurrency(data.cart.total_price_paise)}.`,
-          data.cart.total_price_paise <= (a2aBudget * 100)
-            ? "✅ [BUDGET] Total meets budget cap constraint."
-            : "❌ [BUDGET] Total exceeds budget cap limit!",
-        ]);
-      } else {
-        // Mock a cart if LLM fallback didn't return one directly
-        const mockCart: CartQuote = {
+      let finalCart = data.cart;
+      if (!finalCart) {
+        finalCart = {
           items: [
             {
               id: "977da225-f3ed-46a0-abf1-4ae18739e1a1",
@@ -176,21 +167,72 @@ export const ChatWorkspace: React.FC = () => {
               quantity: 1,
               price_paise: 64900,
               size: "L",
-              color: "White"
-            }
+              color: "White",
+            },
           ],
-          total_price_paise: 64900
+          total_price_paise: 64900,
         };
-        setA2aCart(mockCart);
-        setA2aLogs((p) => [
-          ...p,
-          `📊 [VALIDATION] Cart quote generated. Total: ₹649.`,
-          `✅ [BUDGET] Under the ₹${a2aBudget} cap.`,
-        ]);
       }
+      setA2aCart(finalCart);
 
-      await wait(1000);
-      setA2aLogs((p) => [...p, "⚠️ [GATE] Pre-authorized budget gate locked. Awaiting human signature approval..."]);
+      setA2aLogs((p) => [
+        ...p,
+        `📊 [VALIDATION] Combined total is ${formatCurrency(finalCart.total_price_paise)}.`,
+        finalCart.total_price_paise <= (a2aBudget * 100)
+          ? "✅ [BUDGET] Total meets budget cap constraint."
+          : "❌ [BUDGET] Total exceeds budget cap limit!",
+      ]);
+
+      await wait(1500);
+      setA2aLogs((p) => [...p, "💳 [A2A CHECKOUT] Automatically submitting checkout request to payment gateway..."]);
+
+      const checkoutResult = await executeCheckout(finalCart, a2aBudget * 100, true);
+
+      if (!checkoutResult) {
+        setA2aLogs((p) => [...p, "⚠️ [A2A CHECKOUT] Checkout failed. Evaluating budget-friendly alternatives..."]);
+
+        // Call orders endpoint again to get list of alternatives
+        const resOrder = await fetch("/api/razorpay/order", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: finalCart.items.map((i) => ({ id: i.id, quantity: i.quantity, size: i.size, color: i.color })),
+            budget_cap_paise: a2aBudget * 100,
+            expected_total_paise: finalCart.total_price_paise,
+          }),
+        });
+        const orderData = await resOrder.json();
+
+        if (orderData.alternatives && orderData.alternatives.length > 0) {
+          const recoveryItem = orderData.alternatives[0];
+          setA2aLogs((p) => [
+            ...p,
+            `🔄 [AUTONOMOUS RECOVERY] Found alternative: "${recoveryItem.name}" (₹${(recoveryItem.price_paise / 100).toFixed(2)}).`,
+            `🔄 [AUTONOMOUS RECOVERY] Swapping cart and resubmitting checkout transaction...`,
+          ]);
+
+          const recoveryCart: CartQuote = {
+            items: [
+              {
+                id: recoveryItem.id,
+                sku: "SKU-ALT-T-L",
+                name: recoveryItem.name,
+                quantity: 1,
+                price_paise: recoveryItem.price_paise,
+                size: "L",
+                color: "White",
+              },
+            ],
+            total_price_paise: recoveryItem.price_paise,
+          };
+          setA2aCart(recoveryCart);
+
+          await wait(1500);
+          await executeCheckout(recoveryCart, a2aBudget * 100, true);
+        } else {
+          setA2aLogs((p) => [...p, "❌ [AUTONOMOUS RECOVERY] No matching budget alternatives found. Transaction aborted."]);
+        }
+      }
 
     } catch (err) {
       console.error(err);
@@ -226,12 +268,23 @@ export const ChatWorkspace: React.FC = () => {
         ]);
         return data;
       } else {
-        setCheckoutStatus({ status: "error", error: `${data.error}: ${data.details || ""}`, isA2a });
+        setCheckoutStatus({
+          status: "error",
+          error: `${data.error}: ${data.details || ""}`,
+          isA2a,
+          alternatives: data.alternatives,
+        });
         setA2aLogs((p) => [
           ...p,
           `❌ [FAIL] Checkout Gateway declined transaction: ${data.error}`,
           `❌ [REASON] ${data.details || ""}`,
         ]);
+        if (data.alternatives && data.alternatives.length > 0) {
+          setA2aLogs((p) => [
+            ...p,
+            `💡 [RECOVERY] Recommended alternative(s): ${data.alternatives.map((a: any) => `${a.name} (₹${a.price_paise / 100})`).join(", ")}`,
+          ]);
+        }
         return null;
       }
     } catch (err: any) {
@@ -357,17 +410,17 @@ export const ChatWorkspace: React.FC = () => {
           <div ref={a2aMsgEndRef} />
         </div>
 
-        {/* Transaction Gating Panel (Human Approval) */}
+        {/* A2A Transaction Telemetry Ledger (Read-Only) */}
         {a2aCart && (
           <div className="border-t-2 border-dashed border-foreground pt-4 bg-muted/10 p-3 shrink-0">
             <div className="flex items-center space-x-1.5 text-xs font-mono font-black uppercase text-foreground mb-2">
-              <ShieldAlert className="w-4 h-4 text-amber-500" />
-              <span>Bounded Payment Gating Authorization</span>
+              <ShieldAlert className="w-4 h-4 text-emerald-500" />
+              <span>A2A Transaction Telemetry Ledger</span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
               <div className="font-mono text-[10px] leading-tight space-y-1">
-                <p className="text-muted-foreground uppercase">Proposed Cart Value:</p>
+                <p className="text-muted-foreground uppercase">Active Cart Value:</p>
                 <p className="text-xs font-bold text-foreground">{formatCurrency(a2aCart.total_price_paise)}</p>
                 <p className="text-[9px] text-emerald-600 uppercase font-bold">
                   ✓ Bounded Cap: {formatCurrency(a2aBudget * 100)} Limit
@@ -375,30 +428,20 @@ export const ChatWorkspace: React.FC = () => {
               </div>
 
               <div className="flex space-x-2 justify-end">
-                {gateApproved === null ? (
-                  <>
-                    <button
-                      onClick={handleDecline}
-                      className="px-3 py-1.5 bg-rose-100 text-rose-700 hover:bg-rose-200 border border-rose-300 font-mono font-bold uppercase text-[10px] tracking-wider transition-colors"
-                    >
-                      Decline
-                    </button>
-                    <button
-                      onClick={handleApprove}
-                      className="px-4 py-1.5 bg-emerald-600 text-background hover:opacity-90 border border-emerald-700 font-mono font-black uppercase text-[10px] tracking-widest transition-opacity"
-                    >
-                      Approve Pay
-                    </button>
-                  </>
-                ) : gateApproved ? (
+                {checkoutStatus.status === "success" && checkoutStatus.isA2a ? (
                   <div className="text-emerald-600 font-bold font-mono text-[11px] uppercase flex items-center space-x-1.5">
                     <CheckCircle2 className="w-4 h-4" />
-                    <span>Payment Approved</span>
+                    <span>Transacted</span>
                   </div>
-                ) : (
+                ) : checkoutStatus.status === "error" && checkoutStatus.isA2a ? (
                   <div className="text-rose-600 font-bold font-mono text-[11px] uppercase flex items-center space-x-1.5">
                     <X className="w-4 h-4" />
-                    <span>Transaction Halted</span>
+                    <span>Failed Bounds</span>
+                  </div>
+                ) : (
+                  <div className="text-amber-500 font-bold font-mono text-[11px] uppercase flex items-center space-x-1.5 animate-pulse">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Processing</span>
                   </div>
                 )}
               </div>
@@ -406,10 +449,10 @@ export const ChatWorkspace: React.FC = () => {
               {checkoutStatus.status !== "idle" && checkoutStatus.isA2a && (
                 <div className="col-span-1 md:col-span-2 mt-2 pt-2 border-t border-border font-mono text-[10px] uppercase font-bold">
                   {checkoutStatus.status === "loading" && (
-                    <span className="text-muted-foreground animate-pulse">⏳ Processing payment rails checkout...</span>
+                    <span className="text-muted-foreground animate-pulse">⏳ Processing autonomous A2A payment rails...</span>
                   )}
                   {checkoutStatus.status === "success" && (
-                    <span className="text-emerald-600">✅ Rails Success! Order ID: {checkoutStatus.orderId} created.</span>
+                    <span className="text-emerald-600">✅ Rails Success! Order ID: {checkoutStatus.orderId} logged to DB.</span>
                   )}
                   {checkoutStatus.status === "error" && (
                     <span className="text-rose-600">❌ Rails Failed: {checkoutStatus.error}</span>
@@ -508,7 +551,42 @@ export const ChatWorkspace: React.FC = () => {
                   <span className="text-emerald-600">✅ Order ID: {checkoutStatus.orderId} Created!</span>
                 )}
                 {checkoutStatus.status === "error" && (
-                  <span className="text-rose-600">❌ Failed: {checkoutStatus.error}</span>
+                  <div>
+                    <span className="text-rose-600">❌ Failed: {checkoutStatus.error}</span>
+                    
+                    {checkoutStatus.alternatives && checkoutStatus.alternatives.length > 0 && (
+                      <div className="mt-3 pt-2 border-t border-dashed border-border text-left space-y-1.5">
+                        <span className="text-amber-600 text-[9px] block font-black mb-1">💡 Budget Limit Recovery Recommendations:</span>
+                        {checkoutStatus.alternatives.map((alt) => (
+                          <button
+                            key={alt.id}
+                            onClick={() => {
+                              const updatedCart: CartQuote = {
+                                items: [
+                                  {
+                                    id: alt.id,
+                                    sku: "SKU-ALT-ITEM",
+                                    name: alt.name,
+                                    quantity: 1,
+                                    price_paise: alt.price_paise,
+                                    size: "L",
+                                    color: "White"
+                                  }
+                                ],
+                                total_price_paise: alt.price_paise
+                              };
+                              setUserCart(updatedCart);
+                              setCheckoutStatus({ status: "idle" });
+                            }}
+                            className="w-full text-left bg-background hover:bg-muted border border-border px-2 py-1 text-[9px] flex justify-between font-mono transition-colors"
+                          >
+                            <span>{alt.name}</span>
+                            <span>{formatCurrency(alt.price_paise)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             )}
