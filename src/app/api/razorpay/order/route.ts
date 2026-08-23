@@ -56,8 +56,50 @@ async function calculateCartTotal(items: Array<{ id: string; quantity: number }>
     subtotal_paise: subtotalPaise,
     discount_paise: discountPaise,
     total_paise: finalTotalPaise,
+    final_total_paise: finalTotalPaise,
     items: itemDetails,
   };
+}
+
+/**
+ * Saves order rows to Supabase database for audit telemetry logging
+ */
+async function saveOrderToDb(
+  supabase: any,
+  rzpOrderId: string,
+  pricingItems: any[]
+) {
+  try {
+    const ordersToInsert = pricingItems.map((item) => ({
+      razorpay_order_id: rzpOrderId,
+      product_id: item.product.id,
+      product_name: item.product.name,
+      product_price: item.product.price,
+      quantity: item.quantity,
+      amount: item.price_paise * item.quantity,
+      customer_name: "A2A Buyer Agent",
+      customer_email: "agent@zeroclick.com",
+      customer_phone: "9999999999",
+      shipping_address: {
+        city: "Pune",
+        line1: "Army Institute of Technology, Alandi Road",
+        state: "Maharashtra",
+        pincode: "411015",
+      },
+      size: item.product.sizes[0] || "L",
+      status: "created",
+    }));
+
+    const { error } = await supabase.from("orders").insert(ordersToInsert);
+
+    if (error) {
+      console.error("❌ [DATABASE] [ORDER] Failed to insert orders:", error);
+    } else {
+      console.log(`✅ [DATABASE] [ORDER] Saved ${ordersToInsert.length} order row(s) to DB.`);
+    }
+  } catch (err) {
+    console.error("❌ [DATABASE] [ORDER] Exception during DB insert:", err);
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -183,6 +225,7 @@ export async function POST(request: NextRequest) {
 
     if (!keyId || !keySecret || keyId === "rzp_test_placeholder") {
       const simOrderId = `order_sim_${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+      await saveOrderToDb(supabase, simOrderId, pricing.items);
       console.log(`🎉 [PAYMENT] [SIMULATOR] Issued Order ID: ${simOrderId}. Receipt: receipt_${Date.now()}`);
       console.log("=======================================================\n");
       return NextResponse.json({
@@ -211,6 +254,7 @@ export async function POST(request: NextRequest) {
       }
     });
 
+    await saveOrderToDb(supabase, rzpOrder.id, pricing.items);
     console.log(`🎉 [PAYMENT] [RAZORPAY] Created Order ID: ${rzpOrder.id}. Receipt: ${rzpOrder.receipt}`);
     console.log("=======================================================\n");
 
