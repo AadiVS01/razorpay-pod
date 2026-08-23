@@ -74,11 +74,17 @@ export async function POST(request: NextRequest) {
 
     const secureCap = budget_cap_paise || 500000; // Default max 5000 INR
 
+    console.log("\n=======================================================");
+    console.log("🤖 [A2A CHECKOUT] Initiating Secure Payment Handshake");
+    console.log("=======================================================");
+
     // 1. Price Integrity Guardrail
     let pricing;
     try {
       pricing = await calculateCartTotal(items);
+      console.log(`[GUARDRAIL] [PRICE] calculated total: ₹${(pricing.total_paise / 100).toFixed(2)} (Subtotal: ₹${(pricing.subtotal_paise / 100).toFixed(2)}, Bundle Discount: ₹${(pricing.discount_paise / 100).toFixed(2)})`);
     } catch (pricingErr: any) {
+      console.error(`[GUARDRAIL] [PRICE] pricing check failed: ${pricingErr?.message}`);
       return NextResponse.json(
         { status: "error", error: "PRICING_FAILED", details: pricingErr?.message },
         { status: 400 }
@@ -86,7 +92,8 @@ export async function POST(request: NextRequest) {
     }
 
     if (expected_total_paise !== undefined && pricing.total_paise !== expected_total_paise) {
-      console.warn(`[SECURITY] PRICE_MISMATCH detected! Expected: ${expected_total_paise}, Calculated: ${pricing.total_paise}`);
+      console.error(`❌ [SECURITY] [PRICE_MISMATCH] client expected: ₹${(expected_total_paise / 100).toFixed(2)}, secure calculated total: ₹${(pricing.total_paise / 100).toFixed(2)}`);
+      console.error(`❌ [SECURITY] Possible prompt injection or tampering blocked.`);
       return NextResponse.json(
         {
           status: "error",
@@ -96,10 +103,12 @@ export async function POST(request: NextRequest) {
         { status: 422 }
       );
     }
+    console.log("✅ [GUARDRAIL] [PRICE] Price Integrity verified successfully.");
 
     // 2. Budget Cap Guardrail
+    console.log(`[GUARDRAIL] [BUDGET] Client pre-authorized cap: ₹${(secureCap / 100).toFixed(2)}`);
     if (pricing.total_paise > secureCap) {
-      console.warn(`[SECURITY] BUDGET_CAP_EXCEEDED! Total: ${pricing.total_paise}, Cap: ${secureCap}`);
+      console.error(`❌ [SECURITY] [BUDGET_CAP_EXCEEDED] total ₹${(pricing.total_paise / 100).toFixed(2)} exceeds cap ₹${(secureCap / 100).toFixed(2)}`);
       return NextResponse.json(
         {
           status: "error",
@@ -109,10 +118,12 @@ export async function POST(request: NextRequest) {
         { status: 422 }
       );
     }
+    console.log("✅ [GUARDRAIL] [BUDGET] Budget bounds verified successfully.");
 
     // 3. Atomic Stock Allocation
     const supabase = getAdminSupabase() || supabasePublic;
     if (!supabase) {
+      console.error("❌ [SECURITY] [DATABASE] Supabase client is unavailable.");
       return NextResponse.json(
         { status: "error", error: "DATABASE_UNAVAILABLE" },
         { status: 500 }
@@ -120,6 +131,7 @@ export async function POST(request: NextRequest) {
     }
 
     for (const item of pricing.items) {
+      console.log(`[GUARDRAIL] [STOCK] Checking inventory for "${item.product.name}"...`);
       const { data: prod, error: getErr } = await supabase
         .from("products")
         .select("stock")
@@ -127,6 +139,7 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (getErr || !prod) {
+        console.error(`❌ [GUARDRAIL] [STOCK] Stock query failed for ${item.product.name}`);
         return NextResponse.json(
           { status: "error", error: "STOCK_CHECK_FAILED" },
           { status: 400 }
@@ -134,6 +147,7 @@ export async function POST(request: NextRequest) {
       }
 
       if (prod.stock < item.quantity) {
+        console.error(`❌ [SECURITY] [STOCK_OUT] FAILED. "${item.product.name}" stock: ${prod.stock}, requested: ${item.quantity}`);
         return NextResponse.json(
           {
             status: "error",
@@ -144,7 +158,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Deduct stock
+      // Deduct stock atomically
       const newStock = prod.stock - item.quantity;
       const { error: updateErr } = await supabase
         .from("products")
@@ -152,20 +166,25 @@ export async function POST(request: NextRequest) {
         .eq("id", item.product.id);
 
       if (updateErr) {
+        console.error(`❌ [GUARDRAIL] [STOCK] Stock decrement failed: ${updateErr.message}`);
         return NextResponse.json(
           { status: "error", error: "STOCK_UPDATE_FAILED", details: updateErr.message },
           { status: 500 }
         );
       }
+      console.log(`✅ [GUARDRAIL] [STOCK] Allocated ${item.quantity} unit(s) of "${item.product.name}". Remaining stock: ${newStock}.`);
     }
+
+    console.log("✅ [GUARDRAIL] All checkout security rails cleared. Initiating payment creation...");
 
     // 4. Razorpay Test Rails Checkout
     const keyId = process.env.RAZORPAY_KEY_ID;
     const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
     if (!keyId || !keySecret || keyId === "rzp_test_placeholder") {
-      // Return simulated Razorpay order ID for instant sandbox testing
       const simOrderId = `order_sim_${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+      console.log(`🎉 [PAYMENT] [SIMULATOR] Issued Order ID: ${simOrderId}. Receipt: receipt_${Date.now()}`);
+      console.log("=======================================================\n");
       return NextResponse.json({
         status: "success",
         order_id: simOrderId,
@@ -191,6 +210,9 @@ export async function POST(request: NextRequest) {
         protocol: "a2a-v1.0"
       }
     });
+
+    console.log(`🎉 [PAYMENT] [RAZORPAY] Created Order ID: ${rzpOrder.id}. Receipt: ${rzpOrder.receipt}`);
+    console.log("=======================================================\n");
 
     return NextResponse.json({
       status: "success",
