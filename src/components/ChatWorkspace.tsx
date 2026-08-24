@@ -50,7 +50,7 @@ export const ChatWorkspace: React.FC = () => {
     setA2aMessages([]);
     setA2aLogs([
       "🤖 [A2A] Initializing Buyer Agent...",
-      `🤖 [BUDGET] Setting pre-authorized budget cap: ${formatCurrency(a2aBudget * 100)}`,
+      `💳 [UPI RESERVE PAY] Verifying consent-based pre-authorized spending limit: ${formatCurrency(a2aBudget * 100)}`,
       `🤖 [INTENT] Buyer Agent objective: "${a2aObjective}"`,
     ]);
 
@@ -126,8 +126,8 @@ export const ChatWorkspace: React.FC = () => {
         ...p,
         `📊 [VALIDATION] Combined total is ${formatCurrency(finalCart.total_price_paise)}.`,
         finalCart.total_price_paise <= (a2aBudget * 100)
-          ? "✅ [BUDGET] Total meets budget cap constraint."
-          : "❌ [BUDGET] Total exceeds budget cap limit!",
+          ? "✅ [UPI RESERVE PAY] Transaction amount conforms to pre-authorized consent limit."
+          : "❌ [UPI RESERVE PAY] Transaction amount violates pre-authorized consent limit!",
       ]);
 
       await wait(1500);
@@ -295,7 +295,7 @@ export const ChatWorkspace: React.FC = () => {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-muted-foreground mb-1">
-                Budget Cap (INR)
+                UPI Reserve Pay Cap (INR)
               </label>
               <input
                 type="number"
@@ -371,7 +371,7 @@ export const ChatWorkspace: React.FC = () => {
                 <p className="text-muted-foreground uppercase">Active Cart Value:</p>
                 <p className="text-xs font-bold text-foreground">{formatCurrency(a2aCart.total_price_paise)}</p>
                 <p className="text-[9px] text-emerald-600 uppercase font-bold">
-                  ✓ Bounded Cap: {formatCurrency(a2aBudget * 100)} Limit
+                  ✓ UPI Reserve Pay: {formatCurrency(a2aBudget * 100)} Limit
                 </p>
               </div>
 
