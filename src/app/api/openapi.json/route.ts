@@ -228,6 +228,43 @@ export async function GET(request: Request) {
             }
           }
         }
+      },
+      "/api/razorpay/order/status": {
+        get: {
+          summary: "Verify Order Status",
+          description: "Returns the real-time payment status of the specified order ID.",
+          operationId: "getOrderStatus",
+          parameters: [
+            {
+              name: "order_id",
+              in: "query",
+              required: true,
+              schema: { type: "string" },
+              description: "The unique order ID generated during checkout."
+            }
+          ],
+          responses: {
+            "200": {
+              description: "Status query successful.",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      status: { type: "string" },
+                      order_id: { type: "string" },
+                      payment_status: { type: "string" },
+                      total_amount_paise: { type: "integer" }
+                    }
+                  }
+                }
+              }
+            },
+            "404": {
+              description: "Order not found."
+            }
+          }
+        }
       }
     }
   };
