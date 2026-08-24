@@ -67,7 +67,8 @@ async function calculateCartTotal(items: Array<{ id: string; quantity: number }>
 async function saveOrderToDb(
   supabase: any,
   rzpOrderId: string,
-  pricingItems: any[]
+  pricingItems: any[],
+  status: string = "created"
 ) {
   try {
     const ordersToInsert = pricingItems.map((item) => ({
@@ -87,7 +88,7 @@ async function saveOrderToDb(
         pincode: "411015",
       },
       size: item.product.sizes[0] || "L",
-      status: "created",
+      status: status,
     }));
 
     const { error } = await supabase.from("orders").insert(ordersToInsert);
@@ -105,7 +106,7 @@ async function saveOrderToDb(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { items, budget_cap_paise, expected_total_paise } = body;
+    const { items, budget_cap_paise, expected_total_paise, auto_capture } = body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json(
@@ -245,7 +246,7 @@ export async function POST(request: NextRequest) {
 
     if (!keyId || !keySecret || keyId === "rzp_test_placeholder") {
       const simOrderId = `order_sim_${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
-      await saveOrderToDb(supabase, simOrderId, pricing.items);
+      await saveOrderToDb(supabase, simOrderId, pricing.items, auto_capture ? "paid" : "created");
       console.log(`🎉 [PAYMENT] [SIMULATOR] Issued Order ID: ${simOrderId}. Receipt: receipt_${Date.now()}`);
       console.log("=======================================================\n");
       return NextResponse.json({
@@ -255,6 +256,7 @@ export async function POST(request: NextRequest) {
         currency: "INR",
         simulated: true,
         receipt: `receipt_${Date.now()}`,
+        payment_link_url: auto_capture ? null : `https://rzp.io/i/simulated_${simOrderId}`,
         details: "Checkout executed via A2A Bounded Payment Simulator.",
       });
     }
@@ -274,8 +276,39 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    await saveOrderToDb(supabase, rzpOrder.id, pricing.items);
+    await saveOrderToDb(supabase, rzpOrder.id, pricing.items, auto_capture ? "paid" : "created");
     console.log(`🎉 [PAYMENT] [RAZORPAY] Created Order ID: ${rzpOrder.id}. Receipt: ${rzpOrder.receipt}`);
+
+    let paymentLinkUrl = null;
+    if (!auto_capture) {
+      try {
+        console.log(`[PAYMENT] [RAZORPAY] Generating payment link for Order ID: ${rzpOrder.id}...`);
+        const paymentLink = await rzp.paymentLink.create({
+          amount: pricing.total_paise,
+          currency: "INR",
+          accept_partial: false,
+          description: `Checkout payment for order ${rzpOrder.id}`,
+          customer: {
+            name: "A2A Buyer Agent",
+            email: "agent@zeroclick.com",
+            contact: "+919876543210"
+          },
+          notify: {
+            sms: false,
+            email: false
+          },
+          reminder_enable: false,
+          notes: {
+            razorpay_order_id: rzpOrder.id
+          }
+        });
+        paymentLinkUrl = paymentLink.short_url;
+        console.log(`✅ [PAYMENT] [RAZORPAY] Generated Payment Link URL: ${paymentLinkUrl}`);
+      } catch (linkErr: any) {
+        console.error("❌ [PAYMENT] [RAZORPAY] Failed to create payment link:", linkErr?.message || linkErr);
+      }
+    }
+
     console.log("=======================================================\n");
 
     return NextResponse.json({
@@ -285,6 +318,7 @@ export async function POST(request: NextRequest) {
       currency: "INR",
       simulated: false,
       receipt: rzpOrder.receipt,
+      payment_link_url: paymentLinkUrl,
     });
 
   } catch (error: any) {

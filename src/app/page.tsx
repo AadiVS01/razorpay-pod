@@ -8,7 +8,7 @@ import { ChatWorkspace } from "@/components/ChatWorkspace";
 import { Product } from "@/types/catalog";
 
 export default function HomePage() {
-  const [viewMode, setViewMode] = useState<ViewMode>("store");
+  const [viewMode, setViewMode] = useState<ViewMode>("chat");
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -68,22 +68,7 @@ export default function HomePage() {
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-6 md:px-12 py-8">
         
-        {viewMode === "store" ? (
-          <div className="animate-in fade-in duration-200">
-            <StorefrontView
-              products={products}
-              loading={loading}
-              selectedCategory={selectedCategory}
-              onCategoryChange={setSelectedCategory}
-              searchQuery={searchQuery}
-              onSearchQueryChange={setSearchQuery}
-              maxPrice={maxPrice}
-              onMaxPriceChange={setMaxPrice}
-              inStockOnly={inStockOnly}
-              onInStockOnlyChange={setInStockOnly}
-            />
-          </div>
-        ) : viewMode === "chat" ? (
+        {viewMode === "chat" ? (
           <div className="animate-in fade-in duration-200">
             <ChatWorkspace />
           </div>

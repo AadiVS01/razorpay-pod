@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "zeroclick-gateway": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@ivotoby/openapi-mcp-server"
+      ],
+      "env": {
+        "OPENAPI_SPEC_PATH": "http://localhost:3000/api/openapi.json"
+      }
+    }
+  }
+}

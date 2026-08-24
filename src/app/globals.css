@@ -29,6 +29,9 @@
 }
 
 @layer base {
+  html {
+    font-size: 115%;
+  }
   * {
     border-color: hsl(var(--border));
   }

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Send, Bot, Terminal, ShoppingBag, RefreshCw, Sparkles, User, Play, CheckCircle2, ShieldAlert, X } from "lucide-react";
+import { Bot, RefreshCw, Play, CheckCircle2, ShieldAlert, X } from "lucide-react";
 import { CartQuote } from "@/lib/agent-service";
 import { formatCurrency } from "@/lib/utils";
 
@@ -20,27 +20,16 @@ export const ChatWorkspace: React.FC = () => {
   const [a2aCart, setA2aCart] = useState<CartQuote | null>(null);
   const [gateApproved, setGateApproved] = useState<boolean | null>(null);
 
-  // --- Right Side: User-to-Agent Chat States ---
-  const [userMessages, setUserMessages] = useState<Message[]>([
-    {
-      sender: "clerk",
-      content: "Yo! Welcome to the storefront chat. I'm the AI Clerk. What drop are you looking for today?",
-    },
-  ]);
-  const [userInput, setUserInput] = useState("");
-  const [userLoading, setUserLoading] = useState(false);
-  const [userCart, setUserCart] = useState<CartQuote | null>(null);
-  
   // Payment rail status
   const [checkoutStatus, setCheckoutStatus] = useState<{
     status: "idle" | "loading" | "success" | "error";
     error?: string;
     orderId?: string;
     isA2a?: boolean;
+    alternatives?: any[];
   }>({ status: "idle" });
 
   const a2aMsgEndRef = useRef<HTMLDivElement>(null);
-  const userMsgEndRef = useRef<HTMLDivElement>(null);
   const a2aLogEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -48,50 +37,8 @@ export const ChatWorkspace: React.FC = () => {
   }, [a2aMessages, a2aLoading]);
 
   useEffect(() => {
-    userMsgEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [userMessages, userLoading]);
-
-  useEffect(() => {
     a2aLogEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [a2aLogs]);
-
-  // --- Right Side: User-to-Agent Messaging ---
-  const handleUserSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!userInput.trim() || userLoading) return;
-
-    const text = userInput.trim();
-    setUserInput("");
-    setUserMessages((prev) => [...prev, { sender: "user", content: text }]);
-    setUserLoading(true);
-
-    const apiMessages = [
-      ...userMessages.map((m) => ({
-        role: (m.sender === "user" ? "user" : "assistant") as "user" | "assistant",
-        content: m.content,
-      })),
-      { role: "user" as const, content: text },
-    ];
-
-    try {
-      const res = await fetch("/api/agent/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: apiMessages }),
-      });
-      const data = await res.json();
-      if (data.reply) {
-        setUserMessages((prev) => [...prev, { sender: "clerk", content: data.reply }]);
-      }
-      if (data.cart) {
-        setUserCart(data.cart);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setUserLoading(false);
-    }
-  };
 
   // --- Left Side: Agent-to-Agent Autonomous Sim Run ---
   const runA2aSimulation = async () => {
@@ -156,7 +103,7 @@ export const ChatWorkspace: React.FC = () => {
         "📊 [NEGOTIATION] Evaluating upsell bundle: Argentina Tee + Heavyweight Sweatpants.",
       ]);
 
-      let finalCart = data.cart;
+      let finalCart: CartQuote = data.cart;
       if (!finalCart) {
         finalCart = {
           items: [
@@ -254,6 +201,7 @@ export const ChatWorkspace: React.FC = () => {
           items: cartData.items.map((i) => ({ id: i.id, quantity: i.quantity, size: i.size, color: i.color })),
           budget_cap_paise: budgetCapPaise,
           expected_total_paise: cartData.total_price_paise,
+          auto_capture: isA2a,
         }),
       });
 
@@ -264,7 +212,7 @@ export const ChatWorkspace: React.FC = () => {
         setA2aLogs((p) => [
           ...p,
           `🎉 [SUCCESS] Razorpay Order created: ${data.order_id}`,
-          `💳 [PAYMENT] Rails complete. Status: PAID (Simulated/Test Mode).`,
+          `💳 [PAYMENT] Rails complete. Status: CAPTURED (Simulated Headless Webhook).`,
         ]);
         return data;
       } else {
@@ -313,10 +261,10 @@ export const ChatWorkspace: React.FC = () => {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 w-full min-h-[70vh]">
+    <div className="max-w-3xl mx-auto w-full min-h-[70vh]">
       
       {/* ================= LEFT SIDE: AGENT-TO-AGENT SIMULATOR ================= */}
-      <div className="lg:col-span-6 border-2 border-foreground bg-background p-6 flex flex-col min-h-[550px] shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+      <div className="border-2 border-foreground bg-background p-6 flex flex-col min-h-[550px] shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
         
         {/* Title */}
         <div className="flex items-center justify-between border-b-2 border-foreground pb-4 mb-4">
@@ -385,16 +333,16 @@ export const ChatWorkspace: React.FC = () => {
               className={`flex ${m.sender === "buyer-agent" ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`max-w-[85%] px-3.5 py-2.5 border text-xs font-mono leading-relaxed ${
+                className={`max-w-[85%] px-3.5 py-2.5 border text-sm font-mono leading-relaxed ${
                   m.sender === "buyer-agent"
                     ? "bg-[#0B0F19] text-gray-200 border-gray-800"
                     : "bg-background text-foreground border-foreground shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
                 }`}
               >
-                <span className="block text-[9px] font-bold text-muted-foreground uppercase tracking-widest mb-1">
+                <span className="block text-xs font-bold text-muted-foreground uppercase tracking-widest mb-1">
                   {m.sender === "buyer-agent" ? "🤖 AI Buyer Agent" : "💁 AI Store Clerk"}
                 </span>
-                <p className="uppercase text-[10px] tracking-tight">{m.content}</p>
+                <p className="uppercase text-sm tracking-tight">{m.content}</p>
               </div>
             </div>
           ))}
@@ -462,155 +410,6 @@ export const ChatWorkspace: React.FC = () => {
             </div>
           </div>
         )}
-
-      </div>
-
-      {/* ================= RIGHT SIDE: USER-TO-AGENT CHAT ================= */}
-      <div className="lg:col-span-6 border-2 border-foreground bg-background p-6 flex flex-col min-h-[550px] shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
-        
-        {/* Title */}
-        <div className="flex items-center justify-between border-b-2 border-foreground pb-4 mb-4">
-          <div className="flex items-center space-x-2">
-            <User className="w-5 h-5 text-foreground" />
-            <h2 className="font-mono text-sm font-black uppercase tracking-wider text-foreground">
-              Conversational Commerce Panel (You ↔ AI Store Clerk)
-            </h2>
-          </div>
-          <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
-        </div>
-
-        {/* Message Stream */}
-        <div className="flex-1 overflow-y-auto border border-border bg-muted/10 p-4 space-y-4 max-h-[300px] mb-4 min-h-[220px]">
-          {userMessages.map((m, idx) => (
-            <div
-              key={idx}
-              className={`flex ${m.sender === "user" ? "justify-end" : "justify-start"}`}
-            >
-              <div
-                className={`max-w-[85%] px-3.5 py-2.5 border text-xs font-mono leading-relaxed ${
-                  m.sender === "user"
-                    ? "bg-foreground text-background border-foreground shadow-[2px_2px_0px_0px_rgba(0,0,0,0.15)]"
-                    : "bg-muted/20 text-foreground border-border"
-                }`}
-              >
-                <span className="block text-[9px] font-bold text-muted-foreground uppercase tracking-widest mb-1">
-                  {m.sender === "user" ? "👤 You" : "💁 AI Store Clerk"}
-                </span>
-                <p className="uppercase text-[10px] tracking-tight whitespace-pre-wrap">{m.content}</p>
-              </div>
-            </div>
-          ))}
-
-          {userLoading && (
-            <div className="flex justify-start">
-              <div className="bg-muted/30 border border-border px-3 py-2 text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground flex items-center space-x-2">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>AI Clerk typing...</span>
-              </div>
-            </div>
-          )}
-          <div ref={userMsgEndRef} />
-        </div>
-
-        {/* User Cart Quote Receipt */}
-        {userCart && (
-          <div className="border-t border-border bg-muted/30 p-3 shrink-0 mb-4">
-            <div className="flex items-center space-x-1.5 text-xs font-mono font-black uppercase text-foreground mb-1.5">
-              <ShoppingBag className="w-4 h-4" />
-              <span>Cart Generated via Chat</span>
-            </div>
-
-            <div className="border border-border bg-background p-2 rounded-none space-y-1 font-mono text-[10px] leading-tight">
-              {userCart.items.map((item, index) => (
-                <div key={index} className="flex justify-between text-foreground">
-                  <span className="font-bold">{item.name} ({item.size})</span>
-                  <span>1 × {formatCurrency(item.price_paise)}</span>
-                </div>
-              ))}
-              
-              <div className="border-t border-border pt-1 mt-1.5 flex justify-between font-black text-xs text-foreground uppercase tracking-wider">
-                <span>Total:</span>
-                <span>{formatCurrency(userCart.total_price_paise)}</span>
-              </div>
-            </div>
-
-            <button
-              onClick={() => executeCheckout(userCart, 5000 * 100, false)}
-              disabled={checkoutStatus.status === "loading"}
-              className="w-full mt-2 bg-foreground text-background hover:opacity-85 py-1.5 text-xs font-mono font-black uppercase tracking-wider border border-foreground transition-opacity disabled:opacity-50"
-            >
-              {checkoutStatus.status === "loading" && !checkoutStatus.isA2a ? "Processing..." : "Secure Checkout"}
-            </button>
-
-            {checkoutStatus.status !== "idle" && !checkoutStatus.isA2a && (
-              <div className="mt-2 pt-2 border-t border-border font-mono text-[10px] uppercase font-bold text-center">
-                {checkoutStatus.status === "loading" && (
-                  <span className="text-muted-foreground animate-pulse">⏳ Processing payment...</span>
-                )}
-                {checkoutStatus.status === "success" && (
-                  <span className="text-emerald-600">✅ Order ID: {checkoutStatus.orderId} Created!</span>
-                )}
-                {checkoutStatus.status === "error" && (
-                  <div>
-                    <span className="text-rose-600">❌ Failed: {checkoutStatus.error}</span>
-                    
-                    {checkoutStatus.alternatives && checkoutStatus.alternatives.length > 0 && (
-                      <div className="mt-3 pt-2 border-t border-dashed border-border text-left space-y-1.5">
-                        <span className="text-amber-600 text-[9px] block font-black mb-1">💡 Budget Limit Recovery Recommendations:</span>
-                        {checkoutStatus.alternatives.map((alt) => (
-                          <button
-                            key={alt.id}
-                            onClick={() => {
-                              const updatedCart: CartQuote = {
-                                items: [
-                                  {
-                                    id: alt.id,
-                                    sku: "SKU-ALT-ITEM",
-                                    name: alt.name,
-                                    quantity: 1,
-                                    price_paise: alt.price_paise,
-                                    size: "L",
-                                    color: "White"
-                                  }
-                                ],
-                                total_price_paise: alt.price_paise
-                              };
-                              setUserCart(updatedCart);
-                              setCheckoutStatus({ status: "idle" });
-                            }}
-                            className="w-full text-left bg-background hover:bg-muted border border-border px-2 py-1 text-[9px] flex justify-between font-mono transition-colors"
-                          >
-                            <span>{alt.name}</span>
-                            <span>{formatCurrency(alt.price_paise)}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* User Input Form */}
-        <form onSubmit={handleUserSend} className="flex gap-2 shrink-0">
-          <input
-            type="text"
-            value={userInput}
-            onChange={(e) => setUserInput(e.target.value)}
-            disabled={userLoading}
-            placeholder="TYPE CONVERSATION DROP..."
-            className="flex-1 bg-background border border-border px-3 py-2 text-xs font-mono font-bold uppercase tracking-wider placeholder:text-muted-foreground/60 text-foreground focus:outline-none focus:border-foreground"
-          />
-          <button
-            type="submit"
-            disabled={userLoading || !userInput.trim()}
-            className="bg-foreground text-background px-5 py-2 border border-foreground font-mono font-bold uppercase text-xs tracking-wider transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
-            <Send className="w-3.5 h-3.5" />
-          </button>
-        </form>
 
       </div>
 
