@@ -47,7 +47,15 @@ export async function GET(request: Request) {
                             stock: { type: "integer" },
                             sizes: { type: "array", items: { type: "string" } },
                             colorways: { type: "array", items: { type: "string" } },
-                            description: { type: "string" }
+                            description: { type: "string" },
+                            negotiable: { type: "boolean" },
+                            negotiation_policy: {
+                              type: "object",
+                              properties: {
+                                max_allowed_discount_pct: { type: "integer" },
+                                quote_endpoint: { type: "string" }
+                              }
+                            }
                           }
                         }
                       }
