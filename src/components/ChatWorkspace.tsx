@@ -19,6 +19,7 @@ export const ChatWorkspace: React.FC = () => {
   const [a2aLoading, setA2aLoading] = useState(false);
   const [a2aCart, setA2aCart] = useState<CartQuote | null>(null);
   const [gateApproved, setGateApproved] = useState<boolean | null>(null);
+  const [mandateApproved, setMandateApproved] = useState<boolean>(false);
 
   // Payment rail status
   const [checkoutStatus, setCheckoutStatus] = useState<{
@@ -48,6 +49,23 @@ export const ChatWorkspace: React.FC = () => {
     setGateApproved(null);
     setA2aCart(null);
     setA2aMessages([]);
+
+    if (!mandateApproved) {
+      setA2aLogs([
+        "🤖 [A2A] Initializing Buyer Agent...",
+        "💳 [UPI RESERVE PAY] Querying active consent mandates...",
+        "❌ [UPI RESERVE PAY] Mandate verification failed: No active pre-authorization found.",
+        "⚠️ [SECURITY_BREACH] Autonomous transaction blocked. AI agents cannot execute checkout without explicit user consent."
+      ]);
+      setCheckoutStatus({
+        status: "error",
+        error: "UPI Reserve Pay Mandate not authorized. Click 'Authorize Mandate' to configure spending limits.",
+        isA2a: true
+      });
+      setA2aLoading(false);
+      return;
+    }
+
     setA2aLogs([
       "🤖 [A2A] Initializing Buyer Agent...",
       `💳 [UPI RESERVE PAY] Verifying consent-based pre-authorized spending limit: ${formatCurrency(a2aBudget * 100)}`,
@@ -292,7 +310,7 @@ export const ChatWorkspace: React.FC = () => {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-muted-foreground mb-1">
                 UPI Reserve Pay Cap (INR)
@@ -304,6 +322,20 @@ export const ChatWorkspace: React.FC = () => {
                 disabled={a2aLoading}
                 className="w-full bg-background border border-border px-2.5 py-1.5 text-xs font-mono font-bold uppercase tracking-wider focus:outline-none focus:border-foreground"
               />
+            </div>
+
+            <div className="flex items-end">
+              <button
+                onClick={() => setMandateApproved(!mandateApproved)}
+                disabled={a2aLoading}
+                className={`w-full py-1.5 border text-xs font-mono font-black uppercase tracking-widest flex items-center justify-center transition-all ${
+                  mandateApproved
+                    ? "bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700"
+                    : "bg-amber-500 border-amber-500 text-black hover:bg-amber-600 animate-pulse"
+                }`}
+              >
+                <span>{mandateApproved ? "✓ Mandate Active" : "Authorize Mandate"}</span>
+              </button>
             </div>
             
             <div className="flex items-end">
