@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSupabase, supabasePublic } from "@/lib/supabase";
 import Razorpay from "razorpay";
+import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
 
@@ -106,7 +107,7 @@ async function saveOrderToDb(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { items, budget_cap_paise, expected_total_paise, auto_capture } = body;
+    const { items, budget_cap_paise, expected_total_paise, auto_capture, quote_id } = body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json(
@@ -134,14 +135,48 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (expected_total_paise !== undefined && pricing.total_paise !== expected_total_paise) {
-      console.error(`❌ [SECURITY] [PRICE_MISMATCH] client expected: ₹${(expected_total_paise / 100).toFixed(2)}, secure calculated total: ₹${(pricing.total_paise / 100).toFixed(2)}`);
+    // Verify Quote ID signature if present
+    let quotePriceOverride: number | null = null;
+    if (quote_id && quote_id.startsWith("quote_")) {
+      try {
+        const token = quote_id.substring(6);
+        const decoded = Buffer.from(token, "base64").toString("utf-8");
+        const parts = decoded.split(":");
+        if (parts.length === 5) {
+          const [qProductId, qPriceStr, qExpiresStr, qSize, qHmac] = parts;
+          const secret = process.env.RAZORPAY_KEY_SECRET || "merchant_gateway_secret_key_1029";
+          const verifyMessage = `${qProductId}:${qPriceStr}:${qExpiresStr}:${qSize}`;
+          const expectedHmac = crypto.createHmac("sha256", secret).update(verifyMessage).digest("hex");
+          
+          if (expectedHmac === qHmac && Date.now() < parseInt(qExpiresStr)) {
+            const matchedItem = items.find(item => item.id === qProductId);
+            if (matchedItem) {
+              quotePriceOverride = parseInt(qPriceStr) * matchedItem.quantity;
+              console.log(`✅ [QUOTE_VERIFIED] Valid dynamic quote found. Overriding price total to: ₹${(quotePriceOverride / 100).toFixed(2)}`);
+            }
+          } else {
+            console.warn("⚠️ [QUOTE_VERIFY_FAILED] Quote token signature mismatch or expired.");
+          }
+        }
+      } catch (quoteErr) {
+        console.error("❌ Error parsing quote token:", quoteErr);
+      }
+    }
+
+    if (quotePriceOverride !== null) {
+      pricing.total_paise = quotePriceOverride;
+      pricing.final_total_paise = quotePriceOverride;
+    }
+
+    const checkTotal = quotePriceOverride !== null ? quotePriceOverride : pricing.total_paise;
+    if (expected_total_paise !== undefined && checkTotal !== expected_total_paise) {
+      console.error(`❌ [SECURITY] [PRICE_MISMATCH] client expected: ₹${(expected_total_paise / 100).toFixed(2)}, secure calculated total: ₹${(checkTotal / 100).toFixed(2)}`);
       console.error(`❌ [SECURITY] Possible prompt injection or tampering blocked.`);
       return NextResponse.json(
         {
           status: "error",
           error: "PRICE_MISMATCH",
-          details: `Requested total (${expected_total_paise} paise) does not match merchant calculated total (${pricing.total_paise} paise). Prompt injection blocked.`
+          details: `Requested total (${expected_total_paise} paise) does not match merchant calculated total (${checkTotal} paise). Prompt injection blocked.`
         },
         { status: 422 }
       );

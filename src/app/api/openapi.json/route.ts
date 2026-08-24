@@ -57,6 +57,48 @@ export async function GET(request: Request) {
               }
             }
           }
+      },
+      "/api/agent/quote": {
+        post: {
+          summary: "Submit Programmatic Bid",
+          description: "Submits an autonomous bid price for a specific product. Checks merchant policies and returns a signed quote_id if accepted.",
+          operationId: "submitBid",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["product_id", "bid_price_paise", "size"],
+                  properties: {
+                    product_id: { type: "string" },
+                    bid_price_paise: { type: "integer" },
+                    size: { type: "string" }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            "200": {
+              description: "Bid accepted. Returns signed quote token.",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      status: { type: "string" },
+                      quote_id: { type: "string" },
+                      agreed_price_paise: { type: "integer" }
+                    }
+                  }
+                }
+              }
+            },
+            "422": {
+              description: "Bid rejected (too low or out of stock)."
+            }
+          }
         }
       },
       "/api/agent/chat": {

@@ -91,6 +91,11 @@ export function transformProductForAgent(product: Product): AgentProductItem {
     color_images: product.color_images,
     ai_summary: aiSummary,
     bundle_offers: getBundleOffersForProduct(product.category),
+    negotiable: true,
+    negotiation_policy: {
+      max_allowed_discount_pct: 10,
+      quote_endpoint: "/api/agent/quote"
+    },
   };
 }
 
