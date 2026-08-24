@@ -65,6 +65,7 @@ export async function GET(request: Request) {
               }
             }
           }
+        }
       },
       "/api/agent/quote": {
         post: {
