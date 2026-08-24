@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { protocol, host } = new URL(request.url);
+  const hostUrl = `${protocol}//${host}`;
+
   const openApiSpec = {
     openapi: "3.0.0",
     info: {
@@ -12,8 +15,8 @@ export async function GET() {
     },
     servers: [
       {
-        url: "http://localhost:3000",
-        description: "Local Development Server"
+        url: hostUrl,
+        description: "Active Commerce Server Instance"
       }
     ],
     paths: {
