@@ -41,6 +41,11 @@ export interface AgentProductItem {
   color_images?: Record<string, string[]>;
   ai_summary: string;
   bundle_offers: BundleOffer[];
+  negotiable?: boolean;
+  negotiation_policy?: {
+    max_allowed_discount_pct: number;
+    quote_endpoint: string;
+  };
 }
 
 export interface AgentCatalogResponse {
