@@ -6,7 +6,7 @@ export async function GET(request: Request) {
   const { protocol, host } = new URL(request.url);
   const hostUrl = `${protocol}//${host}`;
 
-  const openApiSpec = {
+  const openApiSpec: Record<string, any> = {
     openapi: "3.0.0",
     info: {
       title: "ZeroClick A2A Commerce Gateway",
