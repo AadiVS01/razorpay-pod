@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSupabase, supabasePublic } from "@/lib/supabase";
 import { logAuditEvent } from "@/lib/audit-ledger";
+import { getMerchantConfig } from "@/lib/merchant-config";
 import Razorpay from "razorpay";
 import crypto from "crypto";
 
@@ -110,7 +111,7 @@ async function saveOrderToDb(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { items, budget_cap_paise, expected_total_paise, auto_capture, quote_id, idempotency_key } = body;
+    const { items, budget_cap_paise, expected_total_paise, auto_capture, quote_id, idempotency_key, mandate_authorized } = body;
 
     const requestIdempotencyKey = request.headers.get("x-idempotency-key") || idempotency_key;
 
@@ -121,11 +122,45 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const secureCap = budget_cap_paise || 500000; // Default max 5000 INR
+    const config = getMerchantConfig();
 
-    console.log("\n=======================================================");
-    console.log("🤖 [A2A CHECKOUT] Initiating Secure Payment Handshake");
-    console.log("=======================================================");
+    // 1. Enforce Autonomy checkout permission (Gate 1)
+    if (!config.policy.agent_can_checkout) {
+      logAuditEvent({
+        actor: "AI Buyer Agent",
+        action: "CHECKOUT_BLOCKED",
+        quote_id: quote_id || null,
+        order_id: null,
+        amount_before: expected_total_paise ? expected_total_paise / 100 : null,
+        amount_after: null,
+        policy_result: "BLOCKED",
+        reason_code: "PRICE_MISMATCH",
+        outcome: "FAILED"
+      });
+      return NextResponse.json(
+        { status: "error", error: "AUTONOMY_DISABLED", details: "Autonomous agent checkout is disabled by merchant policies." },
+        { status: 403 }
+      );
+    }
+
+    // 2. Enforce Mandate pre-authorization consent (Gate 2)
+    if (config.policy.mandate_required && mandate_authorized !== true) {
+      logAuditEvent({
+        actor: "AI Buyer Agent",
+        action: "CHECKOUT_BLOCKED",
+        quote_id: quote_id || null,
+        order_id: null,
+        amount_before: expected_total_paise ? expected_total_paise / 100 : null,
+        amount_after: null,
+        policy_result: "BLOCKED",
+        reason_code: "MANDATE_REQUIRED" as any,
+        outcome: "FAILED"
+      });
+      return NextResponse.json(
+        { status: "error", error: "MANDATE_REQUIRED", details: "UPI Mandate pre-authorization consent is active and required." },
+        { status: 403 }
+      );
+    }
 
     const supabase = getAdminSupabase() || supabasePublic;
     if (!supabase) {
@@ -136,12 +171,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 1. Checkout Idempotency Check (P1)
+    // 3. Checkout Idempotency Check (P1 - Unique constraint check)
     if (requestIdempotencyKey) {
       const { data: existingOrders, error: exErr } = await supabase
         .from("orders")
         .select("*")
-        .like("admin_notes", `%idempotency_key:${requestIdempotencyKey}%`);
+        .eq("razorpay_order_id", `idem_${requestIdempotencyKey}`);
       
       if (!exErr && existingOrders && existingOrders.length > 0) {
         console.log(`✅ [IDEMPOTENCY] Reusing existing order for key ${requestIdempotencyKey}`);
@@ -163,17 +198,15 @@ export async function POST(request: NextRequest) {
           order_id: existingOrders[0].razorpay_order_id,
           amount_paise: existingOrders[0].amount,
           currency: "INR",
-          simulated: existingOrders[0].razorpay_order_id.startsWith("order_sim_"),
+          simulated: true,
           receipt: `receipt_${existingOrders[0].razorpay_order_id}`,
-          payment_link_url: existingOrders[0].razorpay_order_id.startsWith("order_sim_") 
-            ? `https://rzp.io/i/simulated_${existingOrders[0].razorpay_order_id}` 
-            : `https://rzp.io/rzp/reused_${existingOrders[0].razorpay_order_id}`,
+          payment_link_url: `https://rzp.io/i/simulated_${existingOrders[0].razorpay_order_id}`,
           details: "Idempotent payment transaction re-used."
         });
       }
     }
 
-    // 2. Price Integrity Guardrail
+    // 4. Price Integrity Guardrail
     let pricing;
     try {
       pricing = await calculateCartTotal(items);
@@ -186,7 +219,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 3. Verify Quote ID signature and scope (Cart & Quantity) (P1)
+    // 5. Verify Quote ID signature and scope (Cart, Quantity & version validation) (P1)
     let quotePriceOverride: number | null = null;
     if (quote_id && quote_id.startsWith("quote_")) {
       try {
@@ -194,13 +227,13 @@ export async function POST(request: NextRequest) {
         const decoded = Buffer.from(token, "base64").toString("utf-8");
         const parts = decoded.split(":");
         
-        if (parts.length === 7) {
-          const [qProductId, qPriceStr, qExpiresStr, qSize, qQtyStr, qCartId, qHmac] = parts;
+        if (parts.length === 8) {
+          const [qProductId, qPriceStr, qExpiresStr, qSize, qQtyStr, qCartId, qVersion, qHmac] = parts;
           const secret = process.env.RAZORPAY_KEY_SECRET || "merchant_gateway_secret_key_1029";
-          const verifyMessage = `${qProductId}:${qPriceStr}:${qExpiresStr}:${qSize}:${qQtyStr}:${qCartId}`;
+          const verifyMessage = `${qProductId}:${qPriceStr}:${qExpiresStr}:${qSize}:${qQtyStr}:${qCartId}:${qVersion}`;
           const expectedHmac = crypto.createHmac("sha256", secret).update(verifyMessage).digest("hex");
           
-          if (expectedHmac === qHmac && Date.now() < parseInt(qExpiresStr)) {
+          if (expectedHmac === qHmac && Date.now() < parseInt(qExpiresStr) && qVersion === "v1") {
             // Verify cart scope matching
             const matchedItem = items.find(item => item.id === qProductId);
             const clientCartId = body.cart_id || "default_cart";
@@ -271,10 +304,11 @@ export async function POST(request: NextRequest) {
     }
     console.log("✅ [GUARDRAIL] [PRICE] Price Integrity verified successfully.");
 
-    // 4. Budget Cap Guardrail
-    console.log(`[GUARDRAIL] [BUDGET] Client pre-authorized cap: ₹${(secureCap / 100).toFixed(2)}`);
-    if (pricing.total_paise > secureCap) {
-      console.error(`❌ [SECURITY] [BUDGET_CAP_EXCEEDED] total ₹${(pricing.total_paise / 100).toFixed(2)} exceeds cap ₹${(secureCap / 100).toFixed(2)}`);
+    // 6. Budget Cap Policy Guardrail
+    const maxCheckoutCap = config.policy.max_autonomous_checkout_paise;
+    console.log(`[GUARDRAIL] [BUDGET] Merchant policy max limit: ₹${(maxCheckoutCap / 100).toFixed(2)}`);
+    if (pricing.total_paise > maxCheckoutCap) {
+      console.error(`❌ [SECURITY] [BUDGET_CAP_EXCEEDED] total ₹${(pricing.total_paise / 100).toFixed(2)} exceeds cap limit ₹${(maxCheckoutCap / 100).toFixed(2)}`);
       
       logAuditEvent({
         actor: "AI Buyer Agent",
@@ -288,37 +322,18 @@ export async function POST(request: NextRequest) {
         outcome: "FAILED"
       });
 
-      const dbConn = getAdminSupabase() || supabasePublic;
-      let alternatives: any[] = [];
-      if (dbConn) {
-        const { data: cheaperProducts } = await dbConn
-          .from("products")
-          .select("id, name, price")
-          .lte("price", secureCap)
-          .gt("stock", 0)
-          .limit(3);
-        if (cheaperProducts) {
-          alternatives = cheaperProducts.map((p: any) => ({
-            id: p.id,
-            name: p.name,
-            price_paise: p.price,
-          }));
-        }
-      }
-
       return NextResponse.json(
         {
           status: "error",
           error: "BUDGET_CAP_EXCEEDED",
-          details: `Order total of ₹${(pricing.total_paise / 100).toFixed(2)} exceeds your pre-authorized budget cap of ₹${(secureCap / 100).toFixed(2)}.`,
-          alternatives,
+          details: `Order total of ₹${(pricing.total_paise / 100).toFixed(2)} exceeds the merchant pre-configured budget cap limit of ₹${(maxCheckoutCap / 100).toFixed(2)}.`
         },
         { status: 422 }
       );
     }
     console.log("✅ [GUARDRAIL] [BUDGET] Budget bounds verified successfully.");
 
-    // 5. Atomic Stock Allocation (P1 - Concurrency-Safe)
+    // 7. Atomic Stock Allocation (P1 - Concurrency-Safe)
     for (const item of pricing.items) {
       console.log(`[GUARDRAIL] [STOCK] Checking inventory for "${item.product.name}"...`);
       const { data: prod, error: getErr } = await supabase
@@ -375,23 +390,24 @@ export async function POST(request: NextRequest) {
 
     console.log("✅ [GUARDRAIL] All checkout security rails cleared. Initiating payment creation...");
 
-    // 6. Razorpay Test Rails Checkout
+    // 8. Razorpay Test Rails Checkout & Idempotency persistence (Gate 8)
     const keyId = process.env.RAZORPAY_KEY_ID;
     const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
     const actualRzpTotal = pricing.total_paise;
     const adminNotes = `idempotency_key:${requestIdempotencyKey || ""}|quote_id:${quote_id || ""}`;
+    const uniqueIdemOrderId = requestIdempotencyKey ? `idem_${requestIdempotencyKey}` : `order_sim_${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
 
     if (!keyId || !keySecret || keyId === "rzp_test_placeholder") {
-      const simOrderId = `order_sim_${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
-      await saveOrderToDb(supabase, simOrderId, pricing.items, auto_capture ? "paid" : "created", adminNotes);
-      console.log(`🎉 [PAYMENT] [SIMULATOR] Issued Order ID: ${simOrderId}. Receipt: receipt_${Date.now()}`);
+      // Direct insertion will trigger unique constraint violation if duplicate ID is supplied
+      await saveOrderToDb(supabase, uniqueIdemOrderId, pricing.items, auto_capture ? "paid" : "created", adminNotes);
+      console.log(`🎉 [PAYMENT] [SIMULATOR] Issued Order ID: ${uniqueIdemOrderId}. Receipt: receipt_${Date.now()}`);
       
       logAuditEvent({
         actor: "AI Buyer Agent",
         action: "ORDER_CREATED",
         quote_id: quote_id || null,
-        order_id: simOrderId,
+        order_id: uniqueIdemOrderId,
         amount_before: pricing.total_paise / 100,
         amount_after: actualRzpTotal / 100,
         policy_result: "ALLOWED",
@@ -402,12 +418,12 @@ export async function POST(request: NextRequest) {
       console.log("=======================================================\n");
       return NextResponse.json({
         status: "success",
-        order_id: simOrderId,
+        order_id: uniqueIdemOrderId,
         amount_paise: actualRzpTotal,
         currency: "INR",
         simulated: true,
         receipt: `receipt_${Date.now()}`,
-        payment_link_url: auto_capture ? null : `https://rzp.io/i/simulated_${simOrderId}`,
+        payment_link_url: auto_capture ? null : `https://rzp.io/i/simulated_${uniqueIdemOrderId}`,
         details: "Checkout executed via A2A Bounded Payment Simulator.",
       });
     }
@@ -428,14 +444,15 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    await saveOrderToDb(supabase, rzpOrder.id, pricing.items, auto_capture ? "paid" : "created", adminNotes);
+    // Enforce idempotency uniquely in database logs
+    await saveOrderToDb(supabase, uniqueIdemOrderId, pricing.items, auto_capture ? "paid" : "created", `${adminNotes}|rzp_order_id:${rzpOrder.id}`);
     console.log(`🎉 [PAYMENT] [RAZORPAY] Created Order ID: ${rzpOrder.id}. Receipt: ${rzpOrder.receipt}`);
 
     logAuditEvent({
       actor: "AI Buyer Agent",
       action: "ORDER_CREATED",
       quote_id: quote_id || null,
-      order_id: rzpOrder.id,
+      order_id: uniqueIdemOrderId,
       amount_before: pricing.total_paise / 100,
       amount_after: actualRzpTotal / 100,
       policy_result: "ALLOWED",
@@ -477,7 +494,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       status: "success",
-      order_id: rzpOrder.id,
+      order_id: uniqueIdemOrderId,
       amount_paise: actualRzpTotal,
       currency: "INR",
       simulated: false,

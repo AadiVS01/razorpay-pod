@@ -3,7 +3,7 @@
 import React from "react";
 import { Bot, ShoppingBag, ArrowUpRight, MessageSquare } from "lucide-react";
 
-export type ViewMode = "chat" | "agent";
+export type ViewMode = "chat" | "agent" | "merchant";
 
 interface NavbarProps {
   viewMode: ViewMode;
@@ -26,7 +26,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="flex items-center space-x-3">
             <button
               onClick={() => {
-               
                 onCategoryChange("All");
               }}
               className="font-black text-xl md:text-2xl tracking-tight uppercase hover:opacity-85 transition-opacity shrink-0 flex items-center gap-2"
@@ -41,7 +40,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Right Navigation & View Switcher */}
           <div className="flex items-center space-x-3 sm:space-x-4">
             <div className="flex items-center bg-muted/60 p-1 border border-border">
-
 
               <button
                 onClick={() => onViewModeChange("chat")}
@@ -65,6 +63,18 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 <Bot className="w-3.5 h-3.5" />
                 <span>A2A Inspector</span>
+              </button>
+
+              <button
+                onClick={() => onViewModeChange("merchant")}
+                className={`flex items-center space-x-1.5 px-3 py-1 text-xs font-mono font-bold uppercase tracking-wider transition-colors ${
+                  viewMode === "merchant"
+                    ? "bg-foreground text-background"
+                    : "text-foreground hover:opacity-70"
+                }`}
+              >
+                <ShoppingBag className="w-3.5 h-3.5" />
+                <span>Merchant Control</span>
               </button>
             </div>
 

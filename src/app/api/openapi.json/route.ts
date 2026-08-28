@@ -305,6 +305,45 @@ export async function GET(request: Request) {
             }
           }
         }
+      },
+      "/api/merchant/config": {
+        get: {
+          summary: "Retrieve Merchant Configurations",
+          description: "Returns the current global agent policies, outfit bundle rules, and product negotiation overrides.",
+          operationId: "getMerchantConfig",
+          responses: {
+            "200": {
+              description: "Configuration object returned successfully."
+            }
+          }
+        },
+        post: {
+          summary: "Save Merchant Configurations",
+          description: "Updates global agent boundaries and executes server-side validated product price/stock writes to database.",
+          operationId: "saveMerchantConfig",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    config: { type: "object" },
+                    products: { type: "array" }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            "200": {
+              description: "Settings and database products updated successfully."
+            },
+            "422": {
+              description: "Validation error."
+            }
+          }
+        }
       }
     }
   };

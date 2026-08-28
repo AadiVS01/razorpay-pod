@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSupabase, supabasePublic } from "@/lib/supabase";
+import { getMerchantConfig } from "@/lib/merchant-config";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +17,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const config = getMerchantConfig();
+
+    // 1. Enforce Global Policy
+    if (!config.policy.agent_can_negotiate) {
+      return NextResponse.json(
+        {
+          status: "REJECTED",
+          error: "NEGOTIATION_DISABLED",
+          details: "Negotiation is currently disabled by global merchant settings."
+        },
+        { status: 422 }
+      );
+    }
+
+    // 2. Enforce Product Override
+    const override = config.product_overrides[product_id];
+    const isNegotiable = override ? override.negotiable : true;
+    if (!isNegotiable) {
+      return NextResponse.json(
+        {
+          status: "REJECTED",
+          error: "NEGOTIATION_DISABLED",
+          details: "Negotiation for this product has been disabled by merchant overrides."
+        },
+        { status: 422 }
+      );
+    }
+
     const supabase = getAdminSupabase() || supabasePublic;
     if (!supabase) {
       return NextResponse.json(
@@ -24,7 +53,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 1. Fetch live product from Supabase to check base price & stock
+    // 3. Fetch live product from Supabase to check base price & stock
     const { data: product, error } = await supabase
       .from("products")
       .select("*")
@@ -45,9 +74,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 2. Enforce Bidding Policy (Max 10% discount allowed)
+    // 4. Enforce Custom Discount Boundaries
     const basePrice = product.price; // in paise
-    const minAcceptedPrice = Math.round(basePrice * 0.9); // 10% discount cap
+    const maxDiscountPct = override ? override.max_discount_percent : 10;
+    const minAcceptedPrice = Math.round(basePrice * (1 - maxDiscountPct / 100));
 
     if (bid_price_paise < minAcceptedPrice) {
       return NextResponse.json(
@@ -61,11 +91,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 3. Generate Cryptographically Signed Quote Token (Stateless validation)
+    // 5. Generate Cryptographically Signed Quote Token (Stateless validation with v1 version)
     const secret = process.env.RAZORPAY_KEY_SECRET || "merchant_gateway_secret_key_1029";
-    const expiresAt = Date.now() + 5 * 60 * 1000; // Quote expires in 5 minutes
+    const expiresAt = Date.now() + (config.policy.quote_expiry_seconds * 1000);
     
-    const message = `${product_id}:${bid_price_paise}:${expiresAt}:${size}:${quantity}:${cart_id}`;
+    const message = `${product_id}:${bid_price_paise}:${expiresAt}:${size}:${quantity}:${cart_id}:v1`;
     const hmac = crypto.createHmac("sha256", secret).update(message).digest("hex");
     const quoteId = `quote_${Buffer.from(`${message}:${hmac}`).toString("base64")}`;
 

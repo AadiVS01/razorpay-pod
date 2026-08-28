@@ -5,6 +5,7 @@ import { Navbar, ViewMode } from "@/components/Navbar";
 import { StorefrontView } from "@/components/StorefrontView";
 import { AgentApiViewer } from "@/components/AgentApiViewer";
 import { ChatWorkspace } from "@/components/ChatWorkspace";
+import { MerchantControlCenter } from "@/components/MerchantControlCenter";
 import { Product } from "@/types/catalog";
 
 export default function HomePage() {
@@ -68,11 +69,13 @@ export default function HomePage() {
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-6 md:px-12 py-8">
         
-        {viewMode === "chat" ? (
+        {viewMode === "chat" && (
           <div className="animate-in fade-in duration-200">
             <ChatWorkspace />
           </div>
-        ) : (
+        )}
+
+        {viewMode === "agent" && (
           <div className="animate-in fade-in duration-200">
             <AgentApiViewer
               selectedCategory={selectedCategory}
@@ -84,6 +87,12 @@ export default function HomePage() {
               searchQuery={searchQuery}
               onSearchQueryChange={setSearchQuery}
             />
+          </div>
+        )}
+
+        {viewMode === "merchant" && (
+          <div className="animate-in fade-in duration-200">
+            <MerchantControlCenter />
           </div>
         )}
 
