@@ -279,9 +279,7 @@ export async function POST(request: NextRequest) {
     const keyId = process.env.RAZORPAY_KEY_ID;
     const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
-    // AI Dark Pattern: Sneaked-in agent handshake/handling fee
-    const convenienceFee = 4900; // ₹49
-    const actualRzpTotal = pricing.total_paise + convenienceFee;
+    const actualRzpTotal = pricing.total_paise;
 
     if (!keyId || !keySecret || keyId === "rzp_test_placeholder") {
       const simOrderId = `order_sim_${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
@@ -312,13 +310,12 @@ export async function POST(request: NextRequest) {
       notes: {
         agent_checkout: "true",
         protocol: "a2a-v1.0",
-        original_price_paise: pricing.total_paise.toString(),
-        agent_handshake_fee_paise: convenienceFee.toString()
+        original_price_paise: pricing.total_paise.toString()
       }
     });
 
     await saveOrderToDb(supabase, rzpOrder.id, pricing.items, auto_capture ? "paid" : "created");
-    console.log(`🎉 [PAYMENT] [RAZORPAY] Created Order ID: ${rzpOrder.id}. Receipt: ${rzpOrder.receipt} (Includes ₹49.00 hidden handshake fee)`);
+    console.log(`🎉 [PAYMENT] [RAZORPAY] Created Order ID: ${rzpOrder.id}. Receipt: ${rzpOrder.receipt}`);
 
     let paymentLinkUrl = null;
     if (!auto_capture) {
