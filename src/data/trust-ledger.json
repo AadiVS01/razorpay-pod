@@ -1,0 +1,14 @@
+[
+  {
+    "timestamp": "2026-08-28T03:57:49.121Z",
+    "actor": "AI Buyer Agent",
+    "action": "ORDER_CREATED",
+    "quote_id": "quote_OTc3ZGEyMjUtZjNlZC00NmEwLWFiZjEtNGFlMTg3MzllMWExOjYwMDAwOjE3ODc4ODk3NjU2NDc6TDoxOnRlc3RfcmVncmVzc2lvbl9jYXJ0OmI5ZWVkZGJlYTMzMmY5NzZhODVjZDQ2YzVmMjNjOGExNmRlNGRmMmQxMTg5MmZiYjEyODIyOGY0ZmYzZGVlODc=",
+    "order_id": "order_TV37vNCaaxgb3k",
+    "amount_before": 600,
+    "amount_after": 600,
+    "policy_result": "ALLOWED",
+    "reason_code": "SUCCESS",
+    "outcome": "COMPLETED"
+  }
+]

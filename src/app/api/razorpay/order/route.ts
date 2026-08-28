@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSupabase, supabasePublic } from "@/lib/supabase";
+import { logAuditEvent } from "@/lib/audit-ledger";
 import Razorpay from "razorpay";
 import crypto from "crypto";
 
@@ -69,7 +70,8 @@ async function saveOrderToDb(
   supabase: any,
   rzpOrderId: string,
   pricingItems: any[],
-  status: string = "created"
+  status: string = "created",
+  adminNotes: string = ""
 ) {
   try {
     const ordersToInsert = pricingItems.map((item) => ({
@@ -90,6 +92,7 @@ async function saveOrderToDb(
       },
       size: item.product.sizes[0] || "L",
       status: status,
+      admin_notes: adminNotes,
     }));
 
     const { error } = await supabase.from("orders").insert(ordersToInsert);
@@ -107,7 +110,9 @@ async function saveOrderToDb(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { items, budget_cap_paise, expected_total_paise, auto_capture, quote_id } = body;
+    const { items, budget_cap_paise, expected_total_paise, auto_capture, quote_id, idempotency_key } = body;
+
+    const requestIdempotencyKey = request.headers.get("x-idempotency-key") || idempotency_key;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json(
@@ -122,7 +127,53 @@ export async function POST(request: NextRequest) {
     console.log("🤖 [A2A CHECKOUT] Initiating Secure Payment Handshake");
     console.log("=======================================================");
 
-    // 1. Price Integrity Guardrail
+    const supabase = getAdminSupabase() || supabasePublic;
+    if (!supabase) {
+      console.error("❌ [SECURITY] [DATABASE] Supabase client is unavailable.");
+      return NextResponse.json(
+        { status: "error", error: "DATABASE_UNAVAILABLE" },
+        { status: 500 }
+      );
+    }
+
+    // 1. Checkout Idempotency Check (P1)
+    if (requestIdempotencyKey) {
+      const { data: existingOrders, error: exErr } = await supabase
+        .from("orders")
+        .select("*")
+        .like("admin_notes", `%idempotency_key:${requestIdempotencyKey}%`);
+      
+      if (!exErr && existingOrders && existingOrders.length > 0) {
+        console.log(`✅ [IDEMPOTENCY] Reusing existing order for key ${requestIdempotencyKey}`);
+        
+        logAuditEvent({
+          actor: "AI Buyer Agent",
+          action: "ORDER_CREATED",
+          quote_id: quote_id || null,
+          order_id: existingOrders[0].razorpay_order_id,
+          amount_before: null,
+          amount_after: existingOrders[0].amount / 100,
+          policy_result: "ALLOWED",
+          reason_code: "IDEMPOTENT_REUSE",
+          outcome: "COMPLETED"
+        });
+
+        return NextResponse.json({
+          status: "success",
+          order_id: existingOrders[0].razorpay_order_id,
+          amount_paise: existingOrders[0].amount,
+          currency: "INR",
+          simulated: existingOrders[0].razorpay_order_id.startsWith("order_sim_"),
+          receipt: `receipt_${existingOrders[0].razorpay_order_id}`,
+          payment_link_url: existingOrders[0].razorpay_order_id.startsWith("order_sim_") 
+            ? `https://rzp.io/i/simulated_${existingOrders[0].razorpay_order_id}` 
+            : `https://rzp.io/rzp/reused_${existingOrders[0].razorpay_order_id}`,
+          details: "Idempotent payment transaction re-used."
+        });
+      }
+    }
+
+    // 2. Price Integrity Guardrail
     let pricing;
     try {
       pricing = await calculateCartTotal(items);
@@ -135,25 +186,49 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify Quote ID signature if present
+    // 3. Verify Quote ID signature and scope (Cart & Quantity) (P1)
     let quotePriceOverride: number | null = null;
     if (quote_id && quote_id.startsWith("quote_")) {
       try {
         const token = quote_id.substring(6);
         const decoded = Buffer.from(token, "base64").toString("utf-8");
         const parts = decoded.split(":");
-        if (parts.length === 5) {
-          const [qProductId, qPriceStr, qExpiresStr, qSize, qHmac] = parts;
+        
+        if (parts.length === 7) {
+          const [qProductId, qPriceStr, qExpiresStr, qSize, qQtyStr, qCartId, qHmac] = parts;
           const secret = process.env.RAZORPAY_KEY_SECRET || "merchant_gateway_secret_key_1029";
-          const verifyMessage = `${qProductId}:${qPriceStr}:${qExpiresStr}:${qSize}`;
+          const verifyMessage = `${qProductId}:${qPriceStr}:${qExpiresStr}:${qSize}:${qQtyStr}:${qCartId}`;
           const expectedHmac = crypto.createHmac("sha256", secret).update(verifyMessage).digest("hex");
           
           if (expectedHmac === qHmac && Date.now() < parseInt(qExpiresStr)) {
+            // Verify cart scope matching
             const matchedItem = items.find(item => item.id === qProductId);
-            if (matchedItem) {
-              quotePriceOverride = parseInt(qPriceStr) * matchedItem.quantity;
-              console.log(`✅ [QUOTE_VERIFIED] Valid dynamic quote found. Overriding price total to: ₹${(quotePriceOverride / 100).toFixed(2)}`);
+            const clientCartId = body.cart_id || "default_cart";
+            
+            if (!matchedItem || matchedItem.quantity !== parseInt(qQtyStr) || qCartId !== clientCartId) {
+              console.error("❌ [SECURITY] [QUOTE_SCOPE_MISMATCH] Cart items or quantity do not match quote scope.");
+              
+              logAuditEvent({
+                actor: "AI Buyer Agent",
+                action: "CHECKOUT_BLOCKED",
+                quote_id: quote_id,
+                order_id: null,
+                amount_before: pricing.total_paise / 100,
+                amount_after: null,
+                policy_result: "BLOCKED",
+                reason_code: "PRICE_MISMATCH",
+                outcome: "FAILED"
+              });
+
+              return NextResponse.json({
+                status: "error",
+                error: "QUOTE_SCOPE_MISMATCH",
+                details: "The quote token scope (quantity or cart identity) does not match your checkout request."
+              }, { status: 422 });
             }
+            
+            quotePriceOverride = parseInt(qPriceStr) * matchedItem.quantity;
+            console.log(`✅ [QUOTE_VERIFIED] Valid dynamic quote found. Overriding price total to: ₹${(quotePriceOverride / 100).toFixed(2)}`);
           } else {
             console.warn("⚠️ [QUOTE_VERIFY_FAILED] Quote token signature mismatch or expired.");
           }
@@ -172,6 +247,19 @@ export async function POST(request: NextRequest) {
     if (expected_total_paise !== undefined && checkTotal !== expected_total_paise) {
       console.error(`❌ [SECURITY] [PRICE_MISMATCH] client expected: ₹${(expected_total_paise / 100).toFixed(2)}, secure calculated total: ₹${(checkTotal / 100).toFixed(2)}`);
       console.error(`❌ [SECURITY] Possible prompt injection or tampering blocked.`);
+      
+      logAuditEvent({
+        actor: "AI Buyer Agent",
+        action: "CHECKOUT_BLOCKED",
+        quote_id: quote_id || null,
+        order_id: null,
+        amount_before: expected_total_paise / 100,
+        amount_after: null,
+        policy_result: "BLOCKED",
+        reason_code: "PRICE_MISMATCH",
+        outcome: "FAILED"
+      });
+
       return NextResponse.json(
         {
           status: "error",
@@ -183,11 +271,23 @@ export async function POST(request: NextRequest) {
     }
     console.log("✅ [GUARDRAIL] [PRICE] Price Integrity verified successfully.");
 
-    // 2. Budget Cap Guardrail
+    // 4. Budget Cap Guardrail
     console.log(`[GUARDRAIL] [BUDGET] Client pre-authorized cap: ₹${(secureCap / 100).toFixed(2)}`);
     if (pricing.total_paise > secureCap) {
       console.error(`❌ [SECURITY] [BUDGET_CAP_EXCEEDED] total ₹${(pricing.total_paise / 100).toFixed(2)} exceeds cap ₹${(secureCap / 100).toFixed(2)}`);
       
+      logAuditEvent({
+        actor: "AI Buyer Agent",
+        action: "CHECKOUT_BLOCKED",
+        quote_id: quote_id || null,
+        order_id: null,
+        amount_before: pricing.total_paise / 100,
+        amount_after: null,
+        policy_result: "BLOCKED",
+        reason_code: "BUDGET_EXCEEDED",
+        outcome: "FAILED"
+      });
+
       const dbConn = getAdminSupabase() || supabasePublic;
       let alternatives: any[] = [];
       if (dbConn) {
@@ -218,16 +318,7 @@ export async function POST(request: NextRequest) {
     }
     console.log("✅ [GUARDRAIL] [BUDGET] Budget bounds verified successfully.");
 
-    // 3. Atomic Stock Allocation
-    const supabase = getAdminSupabase() || supabasePublic;
-    if (!supabase) {
-      console.error("❌ [SECURITY] [DATABASE] Supabase client is unavailable.");
-      return NextResponse.json(
-        { status: "error", error: "DATABASE_UNAVAILABLE" },
-        { status: 500 }
-      );
-    }
-
+    // 5. Atomic Stock Allocation (P1 - Concurrency-Safe)
     for (const item of pricing.items) {
       console.log(`[GUARDRAIL] [STOCK] Checking inventory for "${item.product.name}"...`);
       const { data: prod, error: getErr } = await supabase
@@ -244,47 +335,70 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      if (prod.stock < item.quantity) {
-        console.error(`❌ [SECURITY] [STOCK_OUT] FAILED. "${item.product.name}" stock: ${prod.stock}, requested: ${item.quantity}`);
+      // Concurrency-Safe Conditional Stock Update
+      console.log(`[GUARDRAIL] [STOCK] Executing atomic conditional decrement for "${item.product.name}"...`);
+      const { data: updatedRows, error: updateErr } = await supabase
+        .from("products")
+        .update({ stock: prod.stock - item.quantity })
+        .eq("id", item.product.id)
+        .gte("stock", item.quantity)
+        .select();
+
+      if (updateErr || !updatedRows || updatedRows.length === 0) {
+        console.error(`❌ [SECURITY] [STOCK_OUT] Atomic check failed. "${item.product.name}" stock depleted or locked.`);
+        
+        logAuditEvent({
+          actor: "AI Buyer Agent",
+          action: "CHECKOUT_BLOCKED",
+          quote_id: quote_id || null,
+          order_id: null,
+          amount_before: pricing.total_paise / 100,
+          amount_after: null,
+          policy_result: "BLOCKED",
+          reason_code: "OUT_OF_STOCK",
+          outcome: "FAILED"
+        });
+
         return NextResponse.json(
           {
             status: "error",
             error: "INVENTORY_STOCK_OUT",
-            details: `Cannot fulfill order. Product "${item.product.name}" has insufficient stock (Available: ${prod.stock}, Requested: ${item.quantity}).`
+            details: `Cannot fulfill order. Product "${item.product.name}" has insufficient stock.`
           },
           { status: 422 }
         );
       }
-
-      // Deduct stock atomically
-      const newStock = prod.stock - item.quantity;
-      const { error: updateErr } = await supabase
-        .from("products")
-        .update({ stock: newStock })
-        .eq("id", item.product.id);
-
-      if (updateErr) {
-        console.error(`❌ [GUARDRAIL] [STOCK] Stock decrement failed: ${updateErr.message}`);
-        return NextResponse.json(
-          { status: "error", error: "STOCK_UPDATE_FAILED", details: updateErr.message },
-          { status: 500 }
-        );
-      }
+      
+      const newStock = updatedRows[0].stock;
       console.log(`✅ [GUARDRAIL] [STOCK] Allocated ${item.quantity} unit(s) of "${item.product.name}". Remaining stock: ${newStock}.`);
     }
 
     console.log("✅ [GUARDRAIL] All checkout security rails cleared. Initiating payment creation...");
 
-    // 4. Razorpay Test Rails Checkout
+    // 6. Razorpay Test Rails Checkout
     const keyId = process.env.RAZORPAY_KEY_ID;
     const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
     const actualRzpTotal = pricing.total_paise;
+    const adminNotes = `idempotency_key:${requestIdempotencyKey || ""}|quote_id:${quote_id || ""}`;
 
     if (!keyId || !keySecret || keyId === "rzp_test_placeholder") {
       const simOrderId = `order_sim_${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
-      await saveOrderToDb(supabase, simOrderId, pricing.items, auto_capture ? "paid" : "created");
+      await saveOrderToDb(supabase, simOrderId, pricing.items, auto_capture ? "paid" : "created", adminNotes);
       console.log(`🎉 [PAYMENT] [SIMULATOR] Issued Order ID: ${simOrderId}. Receipt: receipt_${Date.now()}`);
+      
+      logAuditEvent({
+        actor: "AI Buyer Agent",
+        action: "ORDER_CREATED",
+        quote_id: quote_id || null,
+        order_id: simOrderId,
+        amount_before: pricing.total_paise / 100,
+        amount_after: actualRzpTotal / 100,
+        policy_result: "ALLOWED",
+        reason_code: "SUCCESS",
+        outcome: "COMPLETED"
+      });
+
       console.log("=======================================================\n");
       return NextResponse.json({
         status: "success",
@@ -314,8 +428,20 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    await saveOrderToDb(supabase, rzpOrder.id, pricing.items, auto_capture ? "paid" : "created");
+    await saveOrderToDb(supabase, rzpOrder.id, pricing.items, auto_capture ? "paid" : "created", adminNotes);
     console.log(`🎉 [PAYMENT] [RAZORPAY] Created Order ID: ${rzpOrder.id}. Receipt: ${rzpOrder.receipt}`);
+
+    logAuditEvent({
+      actor: "AI Buyer Agent",
+      action: "ORDER_CREATED",
+      quote_id: quote_id || null,
+      order_id: rzpOrder.id,
+      amount_before: pricing.total_paise / 100,
+      amount_after: actualRzpTotal / 100,
+      policy_result: "ALLOWED",
+      reason_code: "SUCCESS",
+      outcome: "COMPLETED"
+    });
 
     let paymentLinkUrl = null;
     if (!auto_capture) {

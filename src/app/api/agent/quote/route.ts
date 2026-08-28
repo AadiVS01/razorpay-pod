@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { product_id, bid_price_paise, size } = body;
+    const { product_id, bid_price_paise, size, quantity = 1, cart_id = "default_cart" } = body;
 
     if (!product_id || !bid_price_paise || !size) {
       return NextResponse.json(
@@ -54,7 +54,8 @@ export async function POST(request: NextRequest) {
         {
           status: "REJECTED",
           error: "BID_TOO_LOW",
-          details: `Bid of ₹${(bid_price_paise / 100).toFixed(2)} is below the merchant's 10% negotiation boundary (Minimum accepted: ₹${(minAcceptedPrice / 100).toFixed(2)}).`
+          details: `Bid rejected: ₹${(bid_price_paise / 100).toFixed(2)} is below the merchant’s minimum accepted price of ₹${(minAcceptedPrice / 100).toFixed(2)}.`,
+          suggested_action: `submit a bid of at least ₹${(minAcceptedPrice / 100).toFixed(2)} or choose the bundle offer.`
         },
         { status: 422 }
       );
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
     const secret = process.env.RAZORPAY_KEY_SECRET || "merchant_gateway_secret_key_1029";
     const expiresAt = Date.now() + 5 * 60 * 1000; // Quote expires in 5 minutes
     
-    const message = `${product_id}:${bid_price_paise}:${expiresAt}:${size}`;
+    const message = `${product_id}:${bid_price_paise}:${expiresAt}:${size}:${quantity}:${cart_id}`;
     const hmac = crypto.createHmac("sha256", secret).update(message).digest("hex");
     const quoteId = `quote_${Buffer.from(`${message}:${hmac}`).toString("base64")}`;
 

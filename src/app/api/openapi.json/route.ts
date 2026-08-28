@@ -265,6 +265,46 @@ export async function GET(request: Request) {
             }
           }
         }
+      },
+      "/api/agent/ledger": {
+        get: {
+          summary: "View Trust Ledger Logs",
+          description: "Returns the complete history of autonomous commerce transactions and security decision events.",
+          operationId: "getTrustLedger",
+          responses: {
+            "200": {
+              description: "Durable audit trail logs returned successfully.",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      status: { type: "string" },
+                      events: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            timestamp: { type: "string" },
+                            actor: { type: "string" },
+                            action: { type: "string" },
+                            quote_id: { type: "string", nullable: true },
+                            order_id: { type: "string", nullable: true },
+                            amount_before: { type: "number", nullable: true },
+                            amount_after: { type: "number", nullable: true },
+                            policy_result: { type: "string" },
+                            reason_code: { type: "string", nullable: true },
+                            outcome: { type: "string" }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   };
