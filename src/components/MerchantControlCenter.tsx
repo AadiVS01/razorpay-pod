@@ -26,6 +26,7 @@ export const MerchantControlCenter: React.FC = () => {
   // Stats
   const [todayRevenue, setTodayRevenue] = useState(0);
   const [todayOrders, setTodayOrders] = useState(0);
+  const [ledgerEvents, setLedgerEvents] = useState<any[]>([]);
 
   // Fetch current configs and products
   const loadConfigAndProducts = async () => {
@@ -67,6 +68,7 @@ export const MerchantControlCenter: React.FC = () => {
         const rev = completed.reduce((acc: number, cur: any) => acc + (cur.amount_after || 0), 0);
         setTodayRevenue(rev);
         setTodayOrders(completed.length);
+        setLedgerEvents(ledgerData.events);
       }
 
     } catch (err: any) {
@@ -504,6 +506,82 @@ export const MerchantControlCenter: React.FC = () => {
 
         </div>
 
+      </div>
+
+      {/* Trust Ledger Audit Trail */}
+      <div className="bg-background border-2 border-foreground p-4 shadow-md space-y-4">
+        <h2 className="text-sm font-black uppercase tracking-wider border-b border-foreground pb-2 flex items-center justify-between">
+          <span>Durable Trust Ledger Audit Logs</span>
+          <span className="text-[10px] text-muted-foreground">Authoritative Transaction History</span>
+        </h2>
+        {ledgerEvents.length === 0 ? (
+          <p className="text-muted-foreground py-2">No transaction events recorded in ledger.</p>
+        ) : (
+          <div className="overflow-x-auto border border-foreground">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-muted/40 uppercase tracking-wider text-[9px] border-b border-foreground font-black">
+                  <th className="p-2 border-r border-foreground">Timestamp</th>
+                  <th className="p-2 border-r border-foreground">Actor</th>
+                  <th className="p-2 border-r border-foreground">Action</th>
+                  <th className="p-2 border-r border-foreground">Quote ID</th>
+                  <th className="p-2 border-r border-foreground">Order ID</th>
+                  <th className="p-2 border-r border-foreground">Before</th>
+                  <th className="p-2 border-r border-foreground">After</th>
+                  <th className="p-2 border-r border-foreground">Policy</th>
+                  <th className="p-2 border-r border-foreground">Reason</th>
+                  <th className="p-2">Outcome</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ledgerEvents.slice().reverse().map((e, idx) => (
+                  <tr key={idx} className="border-b border-foreground hover:bg-muted/20 transition-colors">
+                    <td className="p-2 border-r border-foreground text-[10px] whitespace-nowrap">
+                      {new Date(e.timestamp).toLocaleTimeString()}
+                    </td>
+                    <td className="p-2 border-r border-foreground font-bold text-[10px] whitespace-nowrap">
+                      {e.actor}
+                    </td>
+                    <td className="p-2 border-r border-foreground whitespace-nowrap">
+                      <span className="px-1.5 py-0.5 bg-foreground text-background font-black text-[9px] uppercase tracking-wider">
+                        {e.action}
+                      </span>
+                    </td>
+                    <td className="p-2 border-r border-foreground max-w-[80px] truncate text-[10px] text-muted-foreground" title={e.quote_id}>
+                      {e.quote_id || "-"}
+                    </td>
+                    <td className="p-2 border-r border-foreground font-bold max-w-[80px] truncate text-[10px]" title={e.order_id}>
+                      {e.order_id || "-"}
+                    </td>
+                    <td className="p-2 border-r border-foreground font-bold text-muted-foreground text-[10px]">
+                      {e.amount_before ? `₹${e.amount_before}` : "-"}
+                    </td>
+                    <td className="p-2 border-r border-foreground font-bold text-[10px]">
+                      {e.amount_after ? `₹${e.amount_after}` : "-"}
+                    </td>
+                    <td className="p-2 border-r border-foreground">
+                      <span className={`px-1.5 py-0.5 text-[9px] font-black uppercase ${
+                        e.policy_result === "ALLOWED" ? "bg-emerald-500 text-black border border-emerald-600" : "bg-rose-500 text-white border border-rose-600"
+                      }`}>
+                        {e.policy_result}
+                      </span>
+                    </td>
+                    <td className="p-2 border-r border-foreground text-[10px] text-muted-foreground">
+                      {e.reason_code || "-"}
+                    </td>
+                    <td className="p-2 font-black text-[10px]">
+                      <span className={
+                        e.outcome === "COMPLETED" ? "text-emerald-600" : e.outcome === "RECOVERABLE" ? "text-amber-600" : "text-rose-600"
+                      }>
+                        {e.outcome}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
     </div>

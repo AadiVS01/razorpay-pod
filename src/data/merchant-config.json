@@ -1,0 +1,26 @@
+{
+  "policy": {
+    "max_autonomous_checkout_paise": 70000,
+    "mandate_required": true,
+    "agent_can_recommend_bundles": true,
+    "agent_can_negotiate": true,
+    "agent_can_checkout": true,
+    "quote_expiry_seconds": 600
+  },
+  "product_overrides": {
+    "977da225-f3ed-46a0-abf1-4ae18739e1a1": {
+      "negotiable": true,
+      "max_discount_percent": 10
+    }
+  },
+  "bundle_rules": [
+    {
+      "id": "bundle_complete_outfit",
+      "name": "Complete Outfit",
+      "discount_percent": 15,
+      "active": true,
+      "product_a_id": "977da225-f3ed-46a0-abf1-4ae18739e1a1",
+      "product_b_id": "f2e7d02d-2de1-4638-a463-2a8525a3bc26"
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSupabase, supabasePublic } from "@/lib/supabase";
+import { logAuditEvent } from "@/lib/audit-ledger";
 
 export const dynamic = "force-dynamic";
 
@@ -68,12 +69,104 @@ export async function GET(request: NextRequest) {
   }
 }
 
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { order_id, status } = body;
+
+    if (!order_id || status !== "failed") {
+      return NextResponse.json(
+        { status: "error", error: "INVALID_REQUEST", details: "Required: order_id, status: 'failed'" },
+        { status: 400 }
+      );
+    }
+
+    const supabase = getAdminSupabase() || supabasePublic;
+    if (!supabase) {
+      return NextResponse.json(
+        { status: "error", error: "DATABASE_UNAVAILABLE" },
+        { status: 500 }
+      );
+    }
+
+    // Query order rows to verify if it can be failed
+    const { data: orders, error: getErr } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("razorpay_order_id", order_id);
+
+    if (getErr || !orders || orders.length === 0) {
+      return NextResponse.json(
+        { status: "error", error: "ORDER_NOT_FOUND" },
+        { status: 404 }
+      );
+    }
+
+    const currentStatus = orders[0].status;
+    if (currentStatus === "failed") {
+      return NextResponse.json(
+        { status: "success", message: "Order is already failed. Stock already restored.", already_failed: true },
+        { status: 200 }
+      );
+    }
+
+    // Restore stock for all items in the order
+    for (const item of orders) {
+      const { data: prod } = await supabase
+        .from("products")
+        .select("stock")
+        .eq("id", item.product_id)
+        .single();
+      
+      if (prod) {
+        const restoredStock = prod.stock + item.quantity;
+        await supabase
+          .from("products")
+          .update({ stock: restoredStock })
+          .eq("id", item.product_id);
+        console.log(`[STATUS] Restored stock for ${item.product_name}: +${item.quantity} units. New stock: ${restoredStock}`);
+      }
+    }
+
+    // Update order status to failed
+    await supabase
+      .from("orders")
+      .update({ status: "failed" })
+      .eq("razorpay_order_id", order_id);
+
+    // Log event to Trust Ledger
+    logAuditEvent({
+      actor: "Gateway",
+      action: "STOCK_RESTORATION",
+      quote_id: null,
+      order_id: order_id,
+      amount_before: null,
+      amount_after: null,
+      policy_result: "ALLOWED",
+      reason_code: "SUCCESS" as any,
+      outcome: "FAILED"
+    });
+
+    return NextResponse.json({
+      status: "success",
+      message: "Order marked failed. Inventory successfully restored exactly once.",
+      order_id
+    }, { status: 200 });
+
+  } catch (err: any) {
+    return NextResponse.json(
+      { status: "error", error: "INTERNAL_ERROR", details: err?.message },
+      { status: 500 }
+    );
+  }
+}
+
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 204,
     headers: {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
     },
   });

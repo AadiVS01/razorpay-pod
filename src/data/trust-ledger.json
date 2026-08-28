@@ -10,5 +10,101 @@
     "policy_result": "ALLOWED",
     "reason_code": "SUCCESS",
     "outcome": "COMPLETED"
+  },
+  {
+    "timestamp": "2026-08-28T04:27:47.542Z",
+    "actor": "AI Buyer Agent",
+    "action": "CHECKOUT_BLOCKED",
+    "quote_id": "quote_OTc3ZGEyMjUtZjNlZC00NmEwLWFiZjEtNGFlMTg3MzllMWExOjYwMDAwOjE3ODc4OTE1NjU5MjI6TDoxOnRlc3Rfc2NvcGVfbWlzbWF0Y2hfY2FydDp2MTo4Yzk5YThlOTRiY2ExZjIyNDNmMTIyNmE1MTUyY2ZhMWFmOTUxMzkyMGE2ZjIxNmJjN2M0ZjY3NWYyYjFmNDVl",
+    "order_id": null,
+    "amount_before": 1200,
+    "amount_after": null,
+    "policy_result": "BLOCKED",
+    "reason_code": "MANDATE_REQUIRED",
+    "outcome": "FAILED"
+  },
+  {
+    "timestamp": "2026-08-28T04:28:10.727Z",
+    "actor": "AI Buyer Agent",
+    "action": "CHECKOUT_BLOCKED",
+    "quote_id": "quote_OTc3ZGEyMjUtZjNlZC00NmEwLWFiZjEtNGFlMTg3MzllMWExOjYwMDAwOjE3ODc4OTE1ODkzMTk6TDoxOnRlc3Rfc2NvcGVfbWlzbWF0Y2hfY2FydDp2MTozZWRiZGQ3NjQ1YWYxNWJiMGQwNzQ0ZTE1MTczNmU3MTZmNWM1ZTQ3Yjg5MTlkYzAzZGU5ODEyZTg3ODQyYWE4",
+    "order_id": null,
+    "amount_before": 1298,
+    "amount_after": null,
+    "policy_result": "BLOCKED",
+    "reason_code": "PRICE_MISMATCH",
+    "outcome": "FAILED"
+  },
+  {
+    "timestamp": "2026-08-28T04:28:15.252Z",
+    "actor": "AI Buyer Agent",
+    "action": "ORDER_CREATED",
+    "quote_id": null,
+    "order_id": "idem_idem_key_1787891293042",
+    "amount_before": 649,
+    "amount_after": 649,
+    "policy_result": "ALLOWED",
+    "reason_code": "SUCCESS",
+    "outcome": "COMPLETED"
+  },
+  {
+    "timestamp": "2026-08-28T04:28:15.526Z",
+    "actor": "AI Buyer Agent",
+    "action": "ORDER_CREATED",
+    "quote_id": null,
+    "order_id": "idem_idem_key_1787891293042",
+    "amount_before": null,
+    "amount_after": 649,
+    "policy_result": "ALLOWED",
+    "reason_code": "IDEMPOTENT_REUSE",
+    "outcome": "COMPLETED"
+  },
+  {
+    "timestamp": "2026-08-28T04:28:19.780Z",
+    "actor": "AI Buyer Agent",
+    "action": "ORDER_CREATED",
+    "quote_id": null,
+    "order_id": "idem_concurrent_B_1787891298926",
+    "amount_before": 649,
+    "amount_after": 649,
+    "policy_result": "ALLOWED",
+    "reason_code": "SUCCESS",
+    "outcome": "COMPLETED"
+  },
+  {
+    "timestamp": "2026-08-28T04:28:19.795Z",
+    "actor": "AI Buyer Agent",
+    "action": "CHECKOUT_BLOCKED",
+    "quote_id": null,
+    "order_id": null,
+    "amount_before": 649,
+    "amount_after": null,
+    "policy_result": "BLOCKED",
+    "reason_code": "OUT_OF_STOCK",
+    "outcome": "FAILED"
+  },
+  {
+    "timestamp": "2026-08-28T04:28:30.053Z",
+    "actor": "AI Buyer Agent",
+    "action": "ORDER_CREATED",
+    "quote_id": null,
+    "order_id": "idem_idem_fail_1787891308557",
+    "amount_before": 649,
+    "amount_after": 649,
+    "policy_result": "ALLOWED",
+    "reason_code": "SUCCESS",
+    "outcome": "COMPLETED"
+  },
+  {
+    "timestamp": "2026-08-28T04:28:31.325Z",
+    "actor": "Gateway",
+    "action": "STOCK_RESTORATION",
+    "quote_id": null,
+    "order_id": "idem_idem_fail_1787891308557",
+    "amount_before": null,
+    "amount_after": null,
+    "policy_result": "ALLOWED",
+    "reason_code": "SUCCESS",
+    "outcome": "FAILED"
   }
 ]
