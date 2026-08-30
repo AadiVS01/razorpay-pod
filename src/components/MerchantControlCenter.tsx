@@ -13,6 +13,8 @@ interface ProductRow {
   category: string;
   negotiable: boolean;
   max_discount_percent: number;
+  sizes: string[];
+  colors: string[];
 }
 
 export const MerchantControlCenter: React.FC = () => {
@@ -54,7 +56,9 @@ export const MerchantControlCenter: React.FC = () => {
             active: p.in_stock !== false, // active if returned in catalog
             category: p.category,
             negotiable: override.negotiable,
-            max_discount_percent: override.max_discount_percent
+            max_discount_percent: override.max_discount_percent,
+            sizes: p.sizes || [],
+            colors: p.colors || []
           };
         });
         setProducts(mergedProducts);
@@ -135,9 +139,13 @@ export const MerchantControlCenter: React.FC = () => {
         config,
         products: products.map(p => ({
           id: p.id,
+          name: p.name,
           price_paise: p.price_paise,
           stock: p.stock,
-          active: p.active
+          active: p.active,
+          category: p.category,
+          sizes: p.sizes,
+          colors: p.colors
         }))
       };
 
@@ -218,10 +226,13 @@ export const MerchantControlCenter: React.FC = () => {
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse border border-foreground">
                 <thead>
-                  <tr className="bg-muted/40 uppercase tracking-widest text-[9px] border-b border-foreground">
-                    <th className="p-2 border-r border-foreground">Product</th>
+                  <tr className="bg-muted/40 uppercase tracking-widest text-[9px] border-b border-foreground font-black">
+                    <th className="p-2 border-r border-foreground">Name</th>
+                    <th className="p-2 border-r border-foreground">Category</th>
                     <th className="p-2 border-r border-foreground">Base Price</th>
                     <th className="p-2 border-r border-foreground">Stock</th>
+                    <th className="p-2 border-r border-foreground">Sizes</th>
+                    <th className="p-2 border-r border-foreground">Colors</th>
                     <th className="p-2 border-r border-foreground">Negotiable</th>
                     <th className="p-2 border-r border-foreground">Max Discount</th>
                     <th className="p-2">Active</th>
@@ -230,7 +241,22 @@ export const MerchantControlCenter: React.FC = () => {
                 <tbody>
                   {products.map((p) => (
                     <tr key={p.id} className="border-b border-foreground hover:bg-muted/10 transition-colors">
-                      <td className="p-2 border-r border-foreground font-bold">{p.name}</td>
+                      <td className="p-2 border-r border-foreground">
+                        <input
+                          type="text"
+                          value={p.name}
+                          onChange={(e) => handleProductLocalChange(p.id, "name", e.target.value)}
+                          className="w-full bg-background border border-border px-1 py-0.5 font-bold focus:outline-none"
+                        />
+                      </td>
+                      <td className="p-2 border-r border-foreground">
+                        <input
+                          type="text"
+                          value={p.category}
+                          onChange={(e) => handleProductLocalChange(p.id, "category", e.target.value)}
+                          className="w-full bg-background border border-border px-1 py-0.5 font-bold focus:outline-none"
+                        />
+                      </td>
                       <td className="p-2 border-r border-foreground font-mono">
                         <input
                           type="number"
@@ -245,6 +271,22 @@ export const MerchantControlCenter: React.FC = () => {
                           value={p.stock}
                           onChange={(e) => handleProductLocalChange(p.id, "stock", parseInt(e.target.value || "0"))}
                           className="w-12 bg-background border border-border px-1 py-0.5 font-bold focus:outline-none"
+                        />
+                      </td>
+                      <td className="p-2 border-r border-foreground">
+                        <input
+                          type="text"
+                          value={p.sizes.join(", ")}
+                          onChange={(e) => handleProductLocalChange(p.id, "sizes", e.target.value.split(",").map(s => s.trim()).filter(Boolean))}
+                          className="w-full bg-background border border-border px-1 py-0.5 font-mono focus:outline-none"
+                        />
+                      </td>
+                      <td className="p-2 border-r border-foreground">
+                        <input
+                          type="text"
+                          value={p.colors.join(", ")}
+                          onChange={(e) => handleProductLocalChange(p.id, "colors", e.target.value.split(",").map(c => c.trim()).filter(Boolean))}
+                          className="w-full bg-background border border-border px-1 py-0.5 font-mono focus:outline-none"
                         />
                       </td>
                       <td className="p-2 border-r border-foreground text-center">

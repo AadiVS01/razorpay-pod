@@ -63,15 +63,22 @@ export async function POST(request: NextRequest) {
           );
         }
 
+        const updatePayload: any = {
+          price: p.price_paise,
+          stock: p.stock,
+          active: p.active
+        };
+
+        if (p.name) updatePayload.name = p.name;
+        if (p.category) updatePayload.category = p.category;
+        if (p.sizes && Array.isArray(p.sizes)) updatePayload.sizes = p.sizes;
+        if (p.colors && Array.isArray(p.colors)) updatePayload.colors = p.colors;
+
         console.log(`[MERCHANT_CONFIG] Updating product ${p.id} -> Price: ₹${p.price_paise / 100}, Stock: ${p.stock}, Active: ${p.active}`);
         
         const { error: dbErr } = await supabase
           .from("products")
-          .update({
-            price: p.price_paise,
-            stock: p.stock,
-            active: p.active
-          })
+          .update(updatePayload)
           .eq("id", p.id);
 
         if (dbErr) {
