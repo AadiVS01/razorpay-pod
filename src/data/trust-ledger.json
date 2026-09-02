@@ -536,5 +536,317 @@
       "buyer_savings": 0,
       "incremental_revenue": 0
     }
+  },
+  {
+    "timestamp": "2026-09-02T12:25:32.344Z",
+    "actor": "AI Buyer Agent",
+    "action": "ORDER_CREATED",
+    "session_id": "sess_1788351929786",
+    "cart_id": "test_regression_cart",
+    "quote_id": "quote_OTc3ZGEyMjUtZjNlZC00NmEwLWFiZjEtNGFlMTg3MzllMWExOjYwMDAwOjE3ODgzNTIyMjg4ODI6TDoxOnRlc3RfcmVncmVzc2lvbl9jYXJ0OnYxOjA4NTZhOTllNTY3YTFkMGNkM2JkNmMwZmU3MGE3MDcwYjQ5YjZlOTU5OGQwZmM4ZjRkYWRjZTM5YjFlMGEzMDg=",
+    "order_id": "idem_test_idempotency_1788351928883",
+    "policy_version": "v1",
+    "amount_before": 649,
+    "amount_after": 600,
+    "policy_result": "ALLOWED",
+    "reason_code": "SUCCESS",
+    "outcome": "COMPLETED",
+    "details": "Razorpay order order_TXARrwuI2SaPjj created under policy v1. Total: ₹600.",
+    "gate_results": {
+      "Autonomy Gate": "PASS",
+      "Mandate Bound": "PASS",
+      "Budget Cap Gate": "PASS",
+      "Inventory Stock Gate": "PASS",
+      "Quote Scope Match": "PASS"
+    },
+    "arithmetic": {
+      "subtotal": 649,
+      "discount": 0,
+      "final_total": 600,
+      "buyer_savings": 0,
+      "incremental_revenue": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-02T12:25:35.969Z",
+    "actor": "AI Buyer Agent",
+    "action": "CHECKOUT_BLOCKED",
+    "session_id": "sess_1788351935740",
+    "cart_id": "test_scope_mismatch_cart",
+    "quote_id": "quote_OTc3ZGEyMjUtZjNlZC00NmEwLWFiZjEtNGFlMTg3MzllMWExOjYwMDAwOjE3ODgzNTIyMzU2NjQ6TDoxOnRlc3Rfc2NvcGVfbWlzbWF0Y2hfY2FydDp2MTo2NzRiMmU4YjFjMTVlNDFiN2M1MTUxN2QyMGJlNDQyZmQyNzNmZGI1ZjcyNTEzYmFiNjAyM2U0YzA1NTA2OGIx",
+    "order_id": null,
+    "policy_version": "v1",
+    "amount_before": 1298,
+    "amount_after": null,
+    "policy_result": "BLOCKED",
+    "reason_code": "PRICE_MISMATCH",
+    "outcome": "FAILED",
+    "details": "Quote token scope (quantity or cart identity) does not match checkout request.",
+    "gate_results": {
+      "Autonomy Gate": "PASS",
+      "Mandate Bound": "PASS",
+      "Quote Scope Match": "FAIL"
+    }
+  },
+  {
+    "timestamp": "2026-09-02T12:26:14.017Z",
+    "actor": "AI Buyer Agent",
+    "action": "ORDER_CREATED",
+    "session_id": "sess_1788351972215",
+    "cart_id": "test_regression_cart",
+    "quote_id": "quote_OTc3ZGEyMjUtZjNlZC00NmEwLWFiZjEtNGFlMTg3MzllMWExOjYwMDAwOjE3ODgzNTIyNzA1MTI6TDoxOnRlc3RfcmVncmVzc2lvbl9jYXJ0OnYxOmYzYmFjM2ZmZjMzNDMwMTAyOTAwOTQyM2M1NmRjYjIyN2QxODVmZmJlODgwN2RjMDFlMzBmMDcwY2E5NmRiNGI=",
+    "order_id": "idem_test_idempotency_1788351970512",
+    "policy_version": "v1",
+    "amount_before": 649,
+    "amount_after": 600,
+    "policy_result": "ALLOWED",
+    "reason_code": "SUCCESS",
+    "outcome": "COMPLETED",
+    "details": "Razorpay order order_TXASbSsdwA9ARE created under policy v1. Total: ₹600.",
+    "gate_results": {
+      "Autonomy Gate": "PASS",
+      "Mandate Bound": "PASS",
+      "Budget Cap Gate": "PASS",
+      "Inventory Stock Gate": "PASS",
+      "Quote Scope Match": "PASS"
+    },
+    "arithmetic": {
+      "subtotal": 649,
+      "discount": 0,
+      "final_total": 600,
+      "buyer_savings": 0,
+      "incremental_revenue": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-02T12:26:17.689Z",
+    "actor": "AI Buyer Agent",
+    "action": "CHECKOUT_BLOCKED",
+    "session_id": "sess_1788351977397",
+    "cart_id": "test_scope_mismatch_cart",
+    "quote_id": "quote_OTc3ZGEyMjUtZjNlZC00NmEwLWFiZjEtNGFlMTg3MzllMWExOjYwMDAwOjE3ODgzNTIyNzcyOTE6TDoxOnRlc3Rfc2NvcGVfbWlzbWF0Y2hfY2FydDp2MTpkZDhjNjIxYjc2MWY3YzUzYzM5MGQ0ZDZkMWFkMmQ1OGRkYmIyZjNmMjJkMGYzZDM1NmFmZDhmZGFkOTJjNTMz",
+    "order_id": null,
+    "policy_version": "v1",
+    "amount_before": 1298,
+    "amount_after": null,
+    "policy_result": "BLOCKED",
+    "reason_code": "PRICE_MISMATCH",
+    "outcome": "FAILED",
+    "details": "Quote token scope (quantity or cart identity) does not match checkout request.",
+    "gate_results": {
+      "Autonomy Gate": "PASS",
+      "Mandate Bound": "PASS",
+      "Quote Scope Match": "FAIL"
+    }
+  },
+  {
+    "timestamp": "2026-09-02T12:26:22.265Z",
+    "actor": "AI Buyer Agent",
+    "action": "ORDER_CREATED",
+    "session_id": "sess_1788351981518",
+    "cart_id": "test_idem_cart",
+    "quote_id": null,
+    "order_id": "idem_idem_key_1788351980664",
+    "policy_version": "v2",
+    "amount_before": 649,
+    "amount_after": 649,
+    "policy_result": "ALLOWED",
+    "reason_code": "SUCCESS",
+    "outcome": "COMPLETED",
+    "details": "Razorpay order order_TXASkTqaW9Gkko created under policy v2. Total: ₹649.",
+    "gate_results": {
+      "Autonomy Gate": "PASS",
+      "Mandate Bound": "PASS",
+      "Budget Cap Gate": "PASS",
+      "Inventory Stock Gate": "PASS",
+      "Quote Scope Match": "PASS"
+    },
+    "arithmetic": {
+      "subtotal": 649,
+      "discount": 0,
+      "final_total": 649,
+      "buyer_savings": 0,
+      "incremental_revenue": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-02T12:26:22.475Z",
+    "actor": "AI Buyer Agent",
+    "action": "ORDER_CREATED",
+    "session_id": "sess_1788351982388",
+    "cart_id": "test_idem_cart",
+    "quote_id": null,
+    "order_id": "idem_idem_key_1788351980664",
+    "policy_version": "v2",
+    "amount_before": null,
+    "amount_after": 649,
+    "policy_result": "ALLOWED",
+    "reason_code": "IDEMPOTENT_REUSE",
+    "outcome": "COMPLETED",
+    "details": "Idempotent payment transaction safely re-used with 0 duplicate stock decrements."
+  },
+  {
+    "timestamp": "2026-09-02T12:26:28.047Z",
+    "actor": "AI Buyer Agent",
+    "action": "CHECKOUT_BLOCKED",
+    "session_id": "sess_1788351987002",
+    "cart_id": "default_cart",
+    "quote_id": null,
+    "order_id": null,
+    "policy_version": "v2",
+    "amount_before": 649,
+    "amount_after": null,
+    "policy_result": "BLOCKED",
+    "reason_code": "OUT_OF_STOCK",
+    "outcome": "FAILED",
+    "details": "Cannot fulfill order. Product \"Argentina Sun Of May Tee\" has insufficient stock.",
+    "gate_results": {
+      "Autonomy Gate": "PASS",
+      "Mandate Bound": "PASS",
+      "Budget Cap Gate": "PASS",
+      "Inventory Stock Gate": "FAIL"
+    }
+  },
+  {
+    "timestamp": "2026-09-02T12:26:28.293Z",
+    "actor": "AI Buyer Agent",
+    "action": "ORDER_CREATED",
+    "session_id": "sess_1788351986987",
+    "cart_id": "default_cart",
+    "quote_id": null,
+    "order_id": "idem_concurrent_A_1788351986965",
+    "policy_version": "v2",
+    "amount_before": 649,
+    "amount_after": 649,
+    "policy_result": "ALLOWED",
+    "reason_code": "SUCCESS",
+    "outcome": "COMPLETED",
+    "details": "Razorpay order order_TXASr1ovXrkvOT created under policy v2. Total: ₹649.",
+    "gate_results": {
+      "Autonomy Gate": "PASS",
+      "Mandate Bound": "PASS",
+      "Budget Cap Gate": "PASS",
+      "Inventory Stock Gate": "PASS",
+      "Quote Scope Match": "PASS"
+    },
+    "arithmetic": {
+      "subtotal": 649,
+      "discount": 0,
+      "final_total": 649,
+      "buyer_savings": 0,
+      "incremental_revenue": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-02T12:26:32.448Z",
+    "actor": "AI Buyer Agent",
+    "action": "ORDER_CREATED",
+    "session_id": "sess_1788351991876",
+    "cart_id": "test_recovery_cart",
+    "quote_id": null,
+    "order_id": "idem_idem_fail_1788351991502",
+    "policy_version": "v2",
+    "amount_before": 649,
+    "amount_after": 649,
+    "policy_result": "ALLOWED",
+    "reason_code": "SUCCESS",
+    "outcome": "COMPLETED",
+    "details": "Razorpay order order_TXASvZMcLkPWGX created under policy v2. Total: ₹649.",
+    "gate_results": {
+      "Autonomy Gate": "PASS",
+      "Mandate Bound": "PASS",
+      "Budget Cap Gate": "PASS",
+      "Inventory Stock Gate": "PASS",
+      "Quote Scope Match": "PASS"
+    },
+    "arithmetic": {
+      "subtotal": 649,
+      "discount": 0,
+      "final_total": 649,
+      "buyer_savings": 0,
+      "incremental_revenue": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-02T12:26:33.447Z",
+    "actor": "Gateway",
+    "action": "STOCK_RESTORATION",
+    "quote_id": null,
+    "order_id": "idem_idem_fail_1788351991502",
+    "amount_before": null,
+    "amount_after": null,
+    "policy_result": "ALLOWED",
+    "reason_code": "SUCCESS",
+    "outcome": "FAILED"
+  },
+  {
+    "timestamp": "2026-09-02T12:26:41.636Z",
+    "actor": "Merchant Revenue Agent",
+    "action": "QUOTE_ISSUED",
+    "session_id": "sess_1788352001037",
+    "cart_id": "test_cart_v2",
+    "quote_id": "quote_OTc3ZGEyMjUtZjNlZC00NmEwLWFiZjEtNGFlMTg3MzllMWExOjYwMDAwOjE3ODgzNTI2MDE2MzU6TDoxOnRlc3RfY2FydF92Mjp2MjpkMjY3OTE3Y2JjZWU3YmJhZTE0YzNkYjQxYmIwY2JiZDgwMGFhN2Y2ZjQwOGNhY2U1OGZmOWQ0NWQ5NGRiM2Iw",
+    "order_id": null,
+    "policy_version": "v2",
+    "amount_before": 649,
+    "amount_after": 600,
+    "policy_result": "ALLOWED",
+    "reason_code": "SUCCESS",
+    "outcome": "COMPLETED",
+    "details": "Generated cryptographically signed quote under policy v2. Approved price: ₹600 (Saved ₹49).",
+    "intent_summary": "Buyer agent negotiated price for Argentina Sun Of May Tee (Qty: 1, Size: L)",
+    "arithmetic": {
+      "subtotal": 649,
+      "discount": 49,
+      "final_total": 600,
+      "buyer_savings": 49,
+      "incremental_revenue": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-02T12:26:42.454Z",
+    "actor": "Merchant Revenue Agent",
+    "action": "QUOTE_ISSUED",
+    "session_id": "sess_adapter_1788352002243",
+    "cart_id": "cart_adapter_default",
+    "quote_id": "quote_OTc3ZGEyMjUtZjNlZC00NmEwLWFiZjEtNGFlMTg3MzllMWExOjYwMDAwOjE3ODgzNTI2MDI0NTM6TDoxOmNhcnRfYWRhcHRlcl9kZWZhdWx0OnYyOjU0YjQyMzRiM2NlY2ZmYmViOTY1M2JjNDk4YzExNmZiMGY0NTJjYTgzMGRlNDVmMjdhMzE3NWNhZTEwZjIxYTY=",
+    "order_id": null,
+    "policy_version": "v2",
+    "amount_before": 649,
+    "amount_after": 600,
+    "policy_result": "ALLOWED",
+    "reason_code": "SUCCESS",
+    "outcome": "COMPLETED",
+    "details": "Generated protocol-shaped quote token (ap2-shaped) under policy v2."
+  },
+  {
+    "timestamp": "2026-09-02T12:26:43.513Z",
+    "actor": "AI Buyer Agent",
+    "action": "ORDER_CREATED",
+    "session_id": "sess_adapter_1788352002479",
+    "cart_id": "test_cart_v2",
+    "quote_id": "quote_OTc3ZGEyMjUtZjNlZC00NmEwLWFiZjEtNGFlMTg3MzllMWExOjYwMDAwOjE3ODgzNTI2MDE2MzU6TDoxOnRlc3RfY2FydF92Mjp2MjpkMjY3OTE3Y2JjZWU3YmJhZTE0YzNkYjQxYmIwY2JiZDgwMGFhN2Y2ZjQwOGNhY2U1OGZmOWQ0NWQ5NGRiM2Iw",
+    "order_id": "idem_idem_key_1788352002604",
+    "policy_version": "v2",
+    "amount_before": 649,
+    "amount_after": 600,
+    "policy_result": "ALLOWED",
+    "reason_code": "SUCCESS",
+    "outcome": "COMPLETED",
+    "details": "Razorpay order order_TXAT7fhbE3fd1J created under policy v2. Total: ₹600.",
+    "gate_results": {
+      "Autonomy Gate": "PASS",
+      "Mandate Bound": "PASS",
+      "Budget Cap Gate": "PASS",
+      "Inventory Stock Gate": "PASS",
+      "Quote Scope Match": "PASS"
+    },
+    "arithmetic": {
+      "subtotal": 649,
+      "discount": 0,
+      "final_total": 600,
+      "buyer_savings": 0,
+      "incremental_revenue": 0
+    }
   }
 ]
