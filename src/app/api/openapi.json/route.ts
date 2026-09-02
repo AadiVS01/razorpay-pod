@@ -329,7 +329,9 @@ export async function GET(request: Request) {
                   type: "object",
                   properties: {
                     config: { type: "object" },
-                    products: { type: "array" }
+                    products: { type: "array" },
+                    change_summary: { type: "string" },
+                    rollback_version: { type: "string" }
                   }
                 }
               }
@@ -341,6 +343,36 @@ export async function GET(request: Request) {
             },
             "422": {
               description: "Validation error."
+            }
+          }
+        }
+      },
+      "/api/protocol/adapter": {
+        post: {
+          summary: "Protocol-Shaped Compatibility Gateway",
+          description: "Unified envelope adapter accepting acp-shaped, ap2-shaped, and x402-shaped requests and executing on the authoritative ZeroClick safety engine.",
+          operationId: "protocolAdapter",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["protocol", "action"],
+                  properties: {
+                    protocol: { type: "string", enum: ["acp-shaped", "ap2-shaped", "x402-shaped"] },
+                    action: { type: "string", enum: ["catalog", "quote", "checkout"] },
+                    session_id: { type: "string" },
+                    cart_id: { type: "string" },
+                    payload: { type: "object" }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            "200": {
+              description: "Action executed and wrapped in protocol envelope."
             }
           }
         }

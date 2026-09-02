@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
-import { getAuditEvents } from "@/lib/audit-ledger";
+import { getAuditEvents, getGroupedJourneys } from "@/lib/audit-ledger";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
     const events = getAuditEvents();
+    const journeys = getGroupedJourneys();
     return NextResponse.json(
-      { status: "success", events },
+      { status: "success", events, journeys },
       {
         status: 200,
         headers: {

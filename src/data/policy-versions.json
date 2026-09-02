@@ -1,0 +1,63 @@
+[
+  {
+    "version": "v1",
+    "created_at": "2026-08-28T09:39:13.000Z",
+    "status": "superseded",
+    "change_summary": "Initial baseline revenue policy with 10% discount cap, 15% bundle deal, and 600s quote TTL.",
+    "policy": {
+      "max_autonomous_checkout_paise": 70000,
+      "mandate_required": true,
+      "agent_can_recommend_bundles": true,
+      "agent_can_negotiate": true,
+      "agent_can_checkout": true,
+      "quote_expiry_seconds": 600
+    },
+    "product_overrides": {
+      "977da225-f3ed-46a0-abf1-4ae18739e1a1": {
+        "negotiable": true,
+        "max_discount_percent": 10
+      }
+    },
+    "bundle_rules": [
+      {
+        "id": "bundle_complete_outfit",
+        "name": "Complete Outfit",
+        "discount_percent": 15,
+        "active": true,
+        "product_a_id": "977da225-f3ed-46a0-abf1-4ae18739e1a1",
+        "product_b_id": "f2e7d02d-2de1-4638-a463-2a8525a3bc26",
+        "recommendation_reason": "Bundle matching pants for an elevated streetwear drop and 15% savings."
+      }
+    ]
+  },
+  {
+    "version": "v2",
+    "created_at": "2026-09-02T05:15:26.502Z",
+    "status": "active",
+    "change_summary": "Updated autonomous cap to ₹750",
+    "policy": {
+      "max_autonomous_checkout_paise": 75000,
+      "mandate_required": true,
+      "agent_can_recommend_bundles": true,
+      "agent_can_negotiate": true,
+      "agent_can_checkout": true,
+      "quote_expiry_seconds": 600
+    },
+    "product_overrides": {
+      "977da225-f3ed-46a0-abf1-4ae18739e1a1": {
+        "negotiable": true,
+        "max_discount_percent": 10
+      }
+    },
+    "bundle_rules": [
+      {
+        "id": "bundle_complete_outfit",
+        "name": "Complete Outfit",
+        "discount_percent": 15,
+        "active": true,
+        "product_a_id": "977da225-f3ed-46a0-abf1-4ae18739e1a1",
+        "product_b_id": "f2e7d02d-2de1-4638-a463-2a8525a3bc26"
+      }
+    ]
+  }
+]

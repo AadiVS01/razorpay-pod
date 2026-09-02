@@ -1,6 +1,6 @@
 {
   "policy": {
-    "max_autonomous_checkout_paise": 70000,
+    "max_autonomous_checkout_paise": 75000,
     "mandate_required": true,
     "agent_can_recommend_bundles": true,
     "agent_can_negotiate": true,

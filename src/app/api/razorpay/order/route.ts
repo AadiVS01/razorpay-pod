@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSupabase, supabasePublic } from "@/lib/supabase";
 import { logAuditEvent } from "@/lib/audit-ledger";
-import { getMerchantConfig } from "@/lib/merchant-config";
+import { getMerchantConfig, getActivePolicyVersion } from "@/lib/merchant-config";
 import Razorpay from "razorpay";
 import crypto from "crypto";
 
@@ -111,9 +111,17 @@ async function saveOrderToDb(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { items, budget_cap_paise, expected_total_paise, auto_capture, quote_id, idempotency_key, mandate_authorized } = body;
-
-    const requestIdempotencyKey = request.headers.get("x-idempotency-key") || idempotency_key;
+    const {
+      items,
+      budget_cap_paise,
+      expected_total_paise,
+      auto_capture = false,
+      quote_id,
+      idempotency_key,
+      mandate_authorized = false,
+      session_id = `sess_${Date.now()}`,
+      cart_id = "default_cart"
+    } = body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json(
@@ -123,19 +131,26 @@ export async function POST(request: NextRequest) {
     }
 
     const config = getMerchantConfig();
+    const activeVersion = getActivePolicyVersion();
+    let currentPolicyVersion = activeVersion;
 
-    // 1. Enforce Autonomy checkout permission (Gate 1)
+    // 1. Enforce Global Autonomous Checkout Permission (Gate 1)
     if (!config.policy.agent_can_checkout) {
       logAuditEvent({
         actor: "AI Buyer Agent",
         action: "CHECKOUT_BLOCKED",
+        session_id,
+        cart_id,
         quote_id: quote_id || null,
         order_id: null,
+        policy_version: activeVersion,
         amount_before: expected_total_paise ? expected_total_paise / 100 : null,
         amount_after: null,
         policy_result: "BLOCKED",
-        reason_code: "PRICE_MISMATCH",
-        outcome: "FAILED"
+        reason_code: "BID_TOO_LOW" as any,
+        outcome: "FAILED",
+        details: "Autonomous checkout disabled by merchant policy.",
+        gate_results: { "Autonomy Gate": "FAIL" }
       });
       return NextResponse.json(
         { status: "error", error: "AUTONOMY_DISABLED", details: "Autonomous agent checkout is disabled by merchant policies." },
@@ -148,13 +163,18 @@ export async function POST(request: NextRequest) {
       logAuditEvent({
         actor: "AI Buyer Agent",
         action: "CHECKOUT_BLOCKED",
+        session_id,
+        cart_id,
         quote_id: quote_id || null,
         order_id: null,
+        policy_version: activeVersion,
         amount_before: expected_total_paise ? expected_total_paise / 100 : null,
         amount_after: null,
         policy_result: "BLOCKED",
         reason_code: "MANDATE_REQUIRED" as any,
-        outcome: "FAILED"
+        outcome: "FAILED",
+        details: "UPI Mandate pre-authorization consent is active and required.",
+        gate_results: { "Autonomy Gate": "PASS", "Mandate Bound": "FAIL" }
       });
       return NextResponse.json(
         { status: "error", error: "MANDATE_REQUIRED", details: "UPI Mandate pre-authorization consent is active and required." },
@@ -171,12 +191,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const requestIdempotencyKey = idempotency_key || `idem_key_${Date.now()}`;
+    const uniqueIdemOrderId = `idem_${requestIdempotencyKey}`;
+
     // 3. Checkout Idempotency Check (P1 - Unique constraint check)
     if (requestIdempotencyKey) {
       const { data: existingOrders, error: exErr } = await supabase
         .from("orders")
         .select("*")
-        .eq("razorpay_order_id", `idem_${requestIdempotencyKey}`);
+        .eq("razorpay_order_id", uniqueIdemOrderId);
       
       if (!exErr && existingOrders && existingOrders.length > 0) {
         console.log(`✅ [IDEMPOTENCY] Reusing existing order for key ${requestIdempotencyKey}`);
@@ -184,13 +207,17 @@ export async function POST(request: NextRequest) {
         logAuditEvent({
           actor: "AI Buyer Agent",
           action: "ORDER_CREATED",
+          session_id,
+          cart_id,
           quote_id: quote_id || null,
           order_id: existingOrders[0].razorpay_order_id,
+          policy_version: activeVersion,
           amount_before: null,
           amount_after: existingOrders[0].amount / 100,
           policy_result: "ALLOWED",
           reason_code: "IDEMPOTENT_REUSE",
-          outcome: "COMPLETED"
+          outcome: "COMPLETED",
+          details: "Idempotent payment transaction safely re-used with 0 duplicate stock decrements."
         });
 
         return NextResponse.json({
@@ -233,10 +260,11 @@ export async function POST(request: NextRequest) {
           const verifyMessage = `${qProductId}:${qPriceStr}:${qExpiresStr}:${qSize}:${qQtyStr}:${qCartId}:${qVersion}`;
           const expectedHmac = crypto.createHmac("sha256", secret).update(verifyMessage).digest("hex");
           
-          if (expectedHmac === qHmac && Date.now() < parseInt(qExpiresStr) && qVersion === "v1") {
+          if (expectedHmac === qHmac && Date.now() < parseInt(qExpiresStr) && qVersion) {
+            currentPolicyVersion = qVersion;
             // Verify cart scope matching
             const matchedItem = items.find(item => item.id === qProductId);
-            const clientCartId = body.cart_id || "default_cart";
+            const clientCartId = cart_id || "default_cart";
             
             if (!matchedItem || matchedItem.quantity !== parseInt(qQtyStr) || qCartId !== clientCartId) {
               console.error("❌ [SECURITY] [QUOTE_SCOPE_MISMATCH] Cart items or quantity do not match quote scope.");
@@ -244,13 +272,18 @@ export async function POST(request: NextRequest) {
               logAuditEvent({
                 actor: "AI Buyer Agent",
                 action: "CHECKOUT_BLOCKED",
+                session_id,
+                cart_id: clientCartId,
                 quote_id: quote_id,
                 order_id: null,
+                policy_version: qVersion,
                 amount_before: pricing.total_paise / 100,
                 amount_after: null,
                 policy_result: "BLOCKED",
                 reason_code: "PRICE_MISMATCH",
-                outcome: "FAILED"
+                outcome: "FAILED",
+                details: "Quote token scope (quantity or cart identity) does not match checkout request.",
+                gate_results: { "Autonomy Gate": "PASS", "Mandate Bound": "PASS", "Quote Scope Match": "FAIL" }
               });
 
               return NextResponse.json({
@@ -261,7 +294,7 @@ export async function POST(request: NextRequest) {
             }
             
             quotePriceOverride = parseInt(qPriceStr) * matchedItem.quantity;
-            console.log(`✅ [QUOTE_VERIFIED] Valid dynamic quote found. Overriding price total to: ₹${(quotePriceOverride / 100).toFixed(2)}`);
+            console.log(`✅ [QUOTE_VERIFIED] Valid dynamic quote found under ${qVersion}. Overriding price total to: ₹${(quotePriceOverride / 100).toFixed(2)}`);
           } else {
             console.warn("⚠️ [QUOTE_VERIFY_FAILED] Quote token signature mismatch or expired.");
           }
@@ -365,13 +398,18 @@ export async function POST(request: NextRequest) {
         logAuditEvent({
           actor: "AI Buyer Agent",
           action: "CHECKOUT_BLOCKED",
+          session_id,
+          cart_id,
           quote_id: quote_id || null,
           order_id: null,
+          policy_version: currentPolicyVersion,
           amount_before: pricing.total_paise / 100,
           amount_after: null,
           policy_result: "BLOCKED",
           reason_code: "OUT_OF_STOCK",
-          outcome: "FAILED"
+          outcome: "FAILED",
+          details: `Cannot fulfill order. Product "${item.product.name}" has insufficient stock.`,
+          gate_results: { "Autonomy Gate": "PASS", "Mandate Bound": "PASS", "Budget Cap Gate": "PASS", "Inventory Stock Gate": "FAIL" }
         });
 
         return NextResponse.json(
@@ -396,7 +434,14 @@ export async function POST(request: NextRequest) {
 
     const actualRzpTotal = pricing.total_paise;
     const adminNotes = `idempotency_key:${requestIdempotencyKey || ""}|quote_id:${quote_id || ""}`;
-    const uniqueIdemOrderId = requestIdempotencyKey ? `idem_${requestIdempotencyKey}` : `order_sim_${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+
+    const auditArithmetic = {
+      subtotal: Math.round(pricing.subtotal_paise / 100),
+      discount: Math.round(pricing.discount_paise / 100),
+      final_total: Math.round(actualRzpTotal / 100),
+      buyer_savings: Math.round(pricing.discount_paise / 100),
+      incremental_revenue: Math.round(actualRzpTotal / 100) > 649 ? Math.round(actualRzpTotal / 100) - 649 : 0
+    };
 
     if (!keyId || !keySecret || keyId === "rzp_test_placeholder") {
       // Direct insertion will trigger unique constraint violation if duplicate ID is supplied
@@ -406,13 +451,25 @@ export async function POST(request: NextRequest) {
       logAuditEvent({
         actor: "AI Buyer Agent",
         action: "ORDER_CREATED",
+        session_id,
+        cart_id,
         quote_id: quote_id || null,
         order_id: uniqueIdemOrderId,
-        amount_before: pricing.total_paise / 100,
-        amount_after: actualRzpTotal / 100,
+        policy_version: currentPolicyVersion,
+        amount_before: Math.round(pricing.subtotal_paise / 100),
+        amount_after: Math.round(actualRzpTotal / 100),
         policy_result: "ALLOWED",
         reason_code: "SUCCESS",
-        outcome: "COMPLETED"
+        outcome: "COMPLETED",
+        details: `Autonomous order created successfully under policy ${currentPolicyVersion}. Total: ₹${Math.round(actualRzpTotal / 100)}.`,
+        gate_results: {
+          "Autonomy Gate": "PASS",
+          "Mandate Bound": "PASS",
+          "Budget Cap Gate": "PASS",
+          "Inventory Stock Gate": "PASS",
+          "Quote Scope Match": "PASS"
+        },
+        arithmetic: auditArithmetic
       });
 
       console.log("=======================================================\n");
@@ -451,13 +508,25 @@ export async function POST(request: NextRequest) {
     logAuditEvent({
       actor: "AI Buyer Agent",
       action: "ORDER_CREATED",
+      session_id,
+      cart_id,
       quote_id: quote_id || null,
       order_id: uniqueIdemOrderId,
-      amount_before: pricing.total_paise / 100,
-      amount_after: actualRzpTotal / 100,
+      policy_version: currentPolicyVersion,
+      amount_before: Math.round(pricing.subtotal_paise / 100),
+      amount_after: Math.round(actualRzpTotal / 100),
       policy_result: "ALLOWED",
       reason_code: "SUCCESS",
-      outcome: "COMPLETED"
+      outcome: "COMPLETED",
+      details: `Razorpay order ${rzpOrder.id} created under policy ${currentPolicyVersion}. Total: ₹${Math.round(actualRzpTotal / 100)}.`,
+      gate_results: {
+        "Autonomy Gate": "PASS",
+        "Mandate Bound": "PASS",
+        "Budget Cap Gate": "PASS",
+        "Inventory Stock Gate": "PASS",
+        "Quote Scope Match": "PASS"
+      },
+      arithmetic: auditArithmetic
     });
 
     let paymentLinkUrl = null;

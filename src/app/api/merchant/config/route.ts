@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getMerchantConfig, saveMerchantConfig } from "@/lib/merchant-config";
+import { getMerchantConfig, saveMerchantConfig, getPolicyVersions, getActivePolicyVersion, rollbackToVersion } from "@/lib/merchant-config";
 import { getAdminSupabase, supabasePublic } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -7,7 +7,14 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const config = getMerchantConfig();
-    return NextResponse.json({ status: "success", config }, { status: 200 });
+    const versions = getPolicyVersions();
+    const activeVersion = getActivePolicyVersion();
+    return NextResponse.json({
+      status: "success",
+      config,
+      active_version: activeVersion,
+      versions
+    }, { status: 200 });
   } catch (err: any) {
     return NextResponse.json(
       { status: "error", error: "CONFIG_READ_FAILED", details: err?.message },
@@ -19,7 +26,26 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { config, products } = body;
+    const { config, products, change_summary, rollback_version } = body;
+
+    // 1. Handle Rollback if requested
+    if (rollback_version) {
+      try {
+        const restoredSnapshot = rollbackToVersion(rollback_version);
+        return NextResponse.json({
+          status: "success",
+          message: `Successfully rolled back to policy version ${rollback_version}. New active version: ${restoredSnapshot.version}`,
+          active_version: restoredSnapshot.version,
+          config: getMerchantConfig(),
+          versions: getPolicyVersions()
+        }, { status: 200 });
+      } catch (rollbackErr: any) {
+        return NextResponse.json(
+          { status: "error", error: "ROLLBACK_FAILED", details: rollbackErr?.message },
+          { status: 400 }
+        );
+      }
+    }
 
     if (!config) {
       return NextResponse.json(
@@ -28,9 +54,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 1. Validate & Save local policy configuration
+    // 2. Validate & Save local policy configuration (creates immutable version if changed)
+    let savedVersion;
     try {
-      saveMerchantConfig(config);
+      savedVersion = saveMerchantConfig(config, change_summary);
     } catch (validationErr: any) {
       return NextResponse.json(
         { status: "error", error: "INVALID_CONFIG", details: validationErr?.message },
@@ -38,7 +65,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 2. Validate & Update Supabase products table (Server-side authoritative write)
+    // 3. Validate & Update Supabase products table (Server-side authoritative write)
     if (products && Array.isArray(products)) {
       const supabase = getAdminSupabase() || supabasePublic;
       if (!supabase) {
@@ -93,7 +120,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       status: "success",
-      message: "Merchant configuration and products updated successfully."
+      message: "Merchant configuration and products updated successfully.",
+      active_version: savedVersion.version,
+      versions: getPolicyVersions()
     }, { status: 200 });
 
   } catch (err: any) {
