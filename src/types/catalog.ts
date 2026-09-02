@@ -48,6 +48,27 @@ export interface AgentProductItem {
   };
 }
 
+export interface MerchantCapabilityManifest {
+  manifest_type: "protocol-shaped merchant capability manifest";
+  policy_version: "v1.0";
+  agent_permissions: {
+    can_recommend_bundles: boolean;
+    can_negotiate: boolean;
+    can_checkout: boolean;
+  };
+  mandate_required: boolean;
+  max_autonomous_checkout_inr: number;
+  max_autonomous_checkout_paise: number;
+  quote_expiry_seconds: number;
+  active_bundles: {
+    id: string;
+    name: string;
+    discount_percent: number;
+    product_a_id: string;
+    product_b_id: string;
+  }[];
+}
+
 export interface AgentCatalogResponse {
   status: "success" | "error";
   protocol_version: "a2a-v1.0";
@@ -59,6 +80,7 @@ export interface AgentCatalogResponse {
     merchant_id: string;
   };
   timestamp: string;
+  merchant_capability_manifest: MerchantCapabilityManifest;
   filters_applied: {
     category?: string;
     max_price_inr?: number;

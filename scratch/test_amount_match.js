@@ -29,7 +29,7 @@ async function runRegressionTest() {
   const expiresAt = Date.now() + 5 * 60 * 1000;
 
   // Generate cryptographically signed quote token
-  const verifyMessage = `${productId}:${agreedPricePaise}:${expiresAt}:${size}:${quantity}:${cartId}`;
+  const verifyMessage = `${productId}:${agreedPricePaise}:${expiresAt}:${size}:${quantity}:${cartId}:v1`;
   const hmac = crypto.createHmac("sha256", secret).update(verifyMessage).digest("hex");
   const quoteId = `quote_${Buffer.from(`${verifyMessage}:${hmac}`).toString("base64")}`;
 
@@ -50,6 +50,7 @@ async function runRegressionTest() {
     budget_cap_paise: 70000,
     expected_total_paise: agreedPricePaise,
     auto_capture: true,
+    mandate_authorized: true,
     quote_id: quoteId,
     cart_id: cartId,
     idempotency_key: `test_idempotency_${Date.now()}`

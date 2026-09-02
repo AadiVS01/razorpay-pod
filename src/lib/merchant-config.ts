@@ -22,6 +22,7 @@ export interface BundleRule {
   active: boolean;
   product_a_id: string;
   product_b_id: string;
+  recommendation_reason?: string;
 }
 
 export interface MerchantConfig {
@@ -55,7 +56,8 @@ const DEFAULT_CONFIG: MerchantConfig = {
       discount_percent: 15,
       active: true,
       product_a_id: "977da225-f3ed-46a0-abf1-4ae18739e1a1",
-      product_b_id: "f2e7d02d-2de1-4638-a463-2a8525a3bc26"
+      product_b_id: "f2e7d02d-2de1-4638-a463-2a8525a3bc26",
+      recommendation_reason: "Bundle matching pants for an elevated streetwear drop and 15% savings."
     }
   ]
 };

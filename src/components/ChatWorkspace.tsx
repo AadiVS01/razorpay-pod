@@ -18,7 +18,6 @@ export const ChatWorkspace: React.FC = () => {
   const [a2aLogs, setA2aLogs] = useState<string[]>(["🟢 A2A Simulator idle. Enter objective and click Run."]);
   const [a2aLoading, setA2aLoading] = useState(false);
   const [a2aCart, setA2aCart] = useState<CartQuote | null>(null);
-  const [gateApproved, setGateApproved] = useState<boolean | null>(null);
   const [mandateApproved, setMandateApproved] = useState<boolean>(false);
 
   // Payment rail status
@@ -46,7 +45,6 @@ export const ChatWorkspace: React.FC = () => {
     if (a2aLoading) return;
 
     setA2aLoading(true);
-    setGateApproved(null);
     setA2aCart(null);
     setA2aMessages([]);
 
@@ -220,6 +218,7 @@ export const ChatWorkspace: React.FC = () => {
           budget_cap_paise: budgetCapPaise,
           expected_total_paise: cartData.total_price_paise,
           auto_capture: isA2a,
+          mandate_authorized: mandateApproved,
         }),
       });
 
@@ -259,23 +258,6 @@ export const ChatWorkspace: React.FC = () => {
       setA2aLogs((p) => [...p, `❌ [FAIL] Gateway connection error: ${errMsg}`]);
       return null;
     }
-  };
-
-  const handleApprove = async () => {
-    setGateApproved(true);
-    setA2aLogs((p) => [...p, "🔐 [SECURITY] Transaction approved by user signature."]);
-    if (a2aCart) {
-      await executeCheckout(a2aCart, a2aBudget * 100, true);
-    }
-  };
-
-  const handleDecline = () => {
-    setGateApproved(false);
-    setA2aLogs((p) => [
-      ...p,
-      "🚫 [SECURITY] Transaction declined by user.",
-      "🛑 [STOP] Autonomous execution halted.",
-    ]);
   };
 
   return (

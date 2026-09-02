@@ -28,6 +28,9 @@ export const MerchantControlCenter: React.FC = () => {
   // Stats
   const [todayRevenue, setTodayRevenue] = useState(0);
   const [todayOrders, setTodayOrders] = useState(0);
+  const [blockedActions, setBlockedActions] = useState(0);
+  const [stockIncidents, setStockIncidents] = useState(0);
+  const [totalBuyerSavings, setTotalBuyerSavings] = useState(0);
   const [ledgerEvents, setLedgerEvents] = useState<any[]>([]);
 
   // Fetch current configs and products
@@ -68,11 +71,23 @@ export const MerchantControlCenter: React.FC = () => {
       const ledgerRes = await fetch("/api/agent/ledger");
       const ledgerData = await ledgerRes.json();
       if (ledgerData.status === "success" && ledgerData.events) {
-        const completed = ledgerData.events.filter((e: any) => e.outcome === "COMPLETED");
+        const events = ledgerData.events || [];
+        const completed = events.filter((e: any) => e.outcome === "COMPLETED");
         const rev = completed.reduce((acc: number, cur: any) => acc + (cur.amount_after || 0), 0);
+        const blocked = events.filter((e: any) => e.policy_result === "BLOCKED").length;
+        const stockOuts = events.filter((e: any) => e.reason_code === "OUT_OF_STOCK").length;
+        const savings = completed.reduce((acc: number, cur: any) => {
+          if (cur.amount_before && cur.amount_after && cur.amount_before > cur.amount_after) {
+            return acc + (cur.amount_before - cur.amount_after);
+          }
+          return acc;
+        }, 0);
         setTodayRevenue(rev);
         setTodayOrders(completed.length);
-        setLedgerEvents(ledgerData.events);
+        setBlockedActions(blocked);
+        setStockIncidents(stockOuts);
+        setTotalBuyerSavings(savings);
+        setLedgerEvents(events);
       }
 
     } catch (err: any) {
@@ -187,28 +202,33 @@ export const MerchantControlCenter: React.FC = () => {
     <div className="space-y-6 font-mono text-xs text-foreground">
       
       {/* Top Header stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-background border-2 border-foreground p-4 shadow-md">
-          <span className="text-[10px] text-muted-foreground uppercase font-bold">Store Status</span>
-          <div className="flex items-center space-x-2 mt-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-sm font-black uppercase">Store Live</span>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="bg-background border-2 border-foreground p-3 shadow-md">
+          <span className="text-[9px] text-muted-foreground uppercase font-bold">Store Status</span>
+          <div className="flex items-center space-x-1.5 mt-1">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-xs font-black uppercase">Live Active</span>
           </div>
         </div>
-        <div className="bg-background border-2 border-foreground p-4 shadow-md col-span-1">
-          <span className="text-[10px] text-muted-foreground uppercase font-bold">Active Products</span>
-          <p className="text-xl font-black mt-1">{activeProducts} / {products.length}</p>
+        <div className="bg-background border-2 border-foreground p-3 shadow-md">
+          <span className="text-[9px] text-muted-foreground uppercase font-bold">Catalog</span>
+          <p className="text-lg font-black mt-1">{activeProducts} / {products.length} Drops</p>
         </div>
-        <div className="bg-background border-2 border-foreground p-4 shadow-md col-span-1">
-          <span className="text-[10px] text-muted-foreground uppercase font-bold">Stock Warnings</span>
-          <div className="flex items-center space-x-2 mt-1">
-            {stockWarnings > 0 && <AlertTriangle className="w-4 h-4 text-amber-500" />}
-            <p className="text-xl font-black">{stockWarnings} Items Low</p>
-          </div>
+        <div className="bg-background border-2 border-foreground p-3 shadow-md">
+          <span className="text-[9px] text-muted-foreground uppercase font-bold">Revenue & Orders</span>
+          <p className="text-lg font-black mt-1">₹{todayRevenue} <span className="text-xs text-muted-foreground">({todayOrders})</span></p>
         </div>
-        <div className="bg-background border-2 border-foreground p-4 shadow-md col-span-1">
-          <span className="text-[10px] text-muted-foreground uppercase font-bold">Today's Revenue</span>
-          <p className="text-xl font-black mt-1">₹{todayRevenue} ({todayOrders} orders)</p>
+        <div className="bg-background border-2 border-foreground p-3 shadow-md">
+          <span className="text-[9px] text-muted-foreground uppercase font-bold">Avg Order Value</span>
+          <p className="text-lg font-black mt-1">₹{todayOrders > 0 ? Math.round(todayRevenue / todayOrders) : 0}</p>
+        </div>
+        <div className="bg-background border-2 border-foreground p-3 shadow-md">
+          <span className="text-[9px] text-muted-foreground uppercase font-bold">Policy Protection</span>
+          <p className="text-lg font-black mt-1 text-emerald-600">{blockedActions} Blocked</p>
+        </div>
+        <div className="bg-background border-2 border-foreground p-3 shadow-md">
+          <span className="text-[9px] text-muted-foreground uppercase font-bold">Buyer Savings</span>
+          <p className="text-lg font-black mt-1 text-indigo-600">₹{totalBuyerSavings}</p>
         </div>
       </div>
 
@@ -348,6 +368,42 @@ export const MerchantControlCenter: React.FC = () => {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
+                      <label className="block text-[9px] uppercase font-bold text-muted-foreground mb-1">Product A (Main)</label>
+                      <select
+                        value={bundle.product_a_id}
+                        onChange={(e) => handleUpdateBundle("product_a_id", e.target.value)}
+                        className="w-full bg-background border border-foreground p-2 font-bold text-xs focus:outline-none"
+                      >
+                        {products.map(p => (
+                          <option key={p.id} value={p.id}>{p.name} (₹{Math.round(p.price_paise / 100)})</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[9px] uppercase font-bold text-muted-foreground mb-1">Product B (Add-on)</label>
+                      <select
+                        value={bundle.product_b_id}
+                        onChange={(e) => handleUpdateBundle("product_b_id", e.target.value)}
+                        className="w-full bg-background border border-foreground p-2 font-bold text-xs focus:outline-none"
+                      >
+                        {products.map(p => (
+                          <option key={p.id} value={p.id}>{p.name} (₹{Math.round(p.price_paise / 100)})</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[9px] uppercase font-bold text-muted-foreground mb-1">Recommendation Reason</label>
+                    <input
+                      type="text"
+                      value={bundle.recommendation_reason || ""}
+                      onChange={(e) => handleUpdateBundle("recommendation_reason", e.target.value)}
+                      placeholder="Why should the agent recommend this pairing?"
+                      className="w-full bg-background border border-foreground p-2 font-bold focus:outline-none text-xs"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
                       <label className="block text-[9px] uppercase font-bold text-muted-foreground mb-1">Discount %</label>
                       <input
                         type="number"
@@ -368,31 +424,45 @@ export const MerchantControlCenter: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Bundle Economics Preview */}
-                <div className="border border-dashed border-foreground p-3 bg-muted/20 flex flex-col justify-between">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Economics Preview</span>
-                  <div className="space-y-1 font-mono text-[11px] mt-2">
-                    <div className="flex justify-between">
-                      <span>Individual Total:</span>
-                      <span className="font-bold">₹1,198</span>
+                {/* Bundle Economics Preview (Live Dynamic Calculation) */}
+                {(() => {
+                  const prodA = products.find(p => p.id === bundle.product_a_id);
+                  const prodB = products.find(p => p.id === bundle.product_b_id);
+                  const priceA = prodA ? Math.round(prodA.price_paise / 100) : 649;
+                  const priceB = prodB ? Math.round(prodB.price_paise / 100) : 549;
+                  const individualTotal = priceA + priceB;
+                  const discountAmt = Math.round((individualTotal * bundle.discount_percent) / 100);
+                  const bundleTotal = individualTotal - discountAmt;
+                  const buyerSavings = discountAmt;
+                  const incrementalRevenue = bundleTotal - priceA;
+
+                  return (
+                    <div className="border border-dashed border-foreground p-3 bg-muted/20 flex flex-col justify-between">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Live Economics Preview</span>
+                      <div className="space-y-1 font-mono text-[11px] mt-2">
+                        <div className="flex justify-between">
+                          <span>{prodA?.name?.split(" ")[0] || "Item A"} (₹{priceA}) + {prodB?.name?.split(" ")[0] || "Item B"} (₹{priceB}):</span>
+                          <span className="font-bold">₹{individualTotal}</span>
+                        </div>
+                        <div className="flex justify-between border-b border-border pb-1">
+                          <span>Bundle Total ({bundle.discount_percent}% off):</span>
+                          <span className="font-bold">₹{bundleTotal}</span>
+                        </div>
+                        <div className="flex justify-between text-emerald-600 font-bold">
+                          <span>Buyer Savings:</span>
+                          <span>₹{buyerSavings}</span>
+                        </div>
+                        <div className="flex justify-between text-indigo-600 font-black">
+                          <span>Merchant Captured Revenue:</span>
+                          <span>₹{bundleTotal}</span>
+                        </div>
+                      </div>
+                      <p className="text-[9px] text-muted-foreground leading-tight mt-2 uppercase">
+                        Expands basket size. Generates +₹{incrementalRevenue} incremental revenue versus {prodA?.name?.split(" ")[0] || "single item"} alone.
+                      </p>
                     </div>
-                    <div className="flex justify-between border-b border-border pb-1">
-                      <span>Bundle Total ({bundle.discount_percent}%):</span>
-                      <span className="font-bold">₹1,018</span>
-                    </div>
-                    <div className="flex justify-between text-emerald-600 font-bold">
-                      <span>Buyer Savings:</span>
-                      <span>₹180</span>
-                    </div>
-                    <div className="flex justify-between text-indigo-600 font-black">
-                      <span>Merchant Revenue:</span>
-                      <span>₹1,018</span>
-                    </div>
-                  </div>
-                  <p className="text-[9px] text-muted-foreground leading-tight mt-2 uppercase">
-                    Promotes larger basket size. Generates +₹369 incremental revenue compared to single shirt checkout.
-                  </p>
-                </div>
+                  );
+                })()}
               </div>
             ) : (
               <p className="text-muted-foreground">No bundle rule loaded.</p>

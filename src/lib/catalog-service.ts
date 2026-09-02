@@ -1,4 +1,4 @@
-import { Product, AgentProductItem, AgentCatalogResponse, CatalogFilterParams, BundleOffer } from "@/types/catalog";
+import { Product, AgentProductItem, AgentCatalogResponse, CatalogFilterParams, BundleOffer, MerchantCapabilityManifest } from "@/types/catalog";
 import { getAdminSupabase, supabasePublic } from "./supabase";
 import { getMerchantConfig } from "./merchant-config";
 
@@ -149,6 +149,28 @@ export async function getStoreProducts(filters?: CatalogFilterParams): Promise<P
 export async function getAgentCatalog(filters?: CatalogFilterParams): Promise<AgentCatalogResponse> {
   const products = await getStoreProducts(filters);
   const agentProducts = products.map(transformProductForAgent);
+  const config = getMerchantConfig();
+
+  const manifest: MerchantCapabilityManifest = {
+    manifest_type: "protocol-shaped merchant capability manifest",
+    policy_version: "v1.0",
+    agent_permissions: {
+      can_recommend_bundles: config.policy.agent_can_recommend_bundles,
+      can_negotiate: config.policy.agent_can_negotiate,
+      can_checkout: config.policy.agent_can_checkout,
+    },
+    mandate_required: config.policy.mandate_required,
+    max_autonomous_checkout_inr: config.policy.max_autonomous_checkout_paise / 100,
+    max_autonomous_checkout_paise: config.policy.max_autonomous_checkout_paise,
+    quote_expiry_seconds: config.policy.quote_expiry_seconds,
+    active_bundles: config.bundle_rules.filter(b => b.active).map(b => ({
+      id: b.id,
+      name: b.name,
+      discount_percent: b.discount_percent,
+      product_a_id: b.product_a_id,
+      product_b_id: b.product_b_id,
+    })),
+  };
 
   return {
     status: "success",
@@ -161,6 +183,7 @@ export async function getAgentCatalog(filters?: CatalogFilterParams): Promise<Ag
       merchant_id: "rzp_merchant_zeroclick",
     },
     timestamp: new Date().toISOString(),
+    merchant_capability_manifest: manifest,
     filters_applied: {
       category: filters?.category,
       max_price_inr: filters?.max_price,
