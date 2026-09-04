@@ -7,10 +7,10 @@ export async function GET(request: Request) {
   const hostUrl = `${protocol}//${host}`;
 
   const openApiSpec: Record<string, any> = {
-    openapi: "3.0.0",
+    openapi: "3.1.0",
     info: {
       title: "ZeroClick A2A Commerce Gateway",
-      description: "Machine-readable API spec for autonomous AI Buyer Agents to browse, negotiate, and purchase streetwear drops.",
+      description: "Machine-readable API specification for autonomous AI Buyer Agents to browse, negotiate, and execute zero-click ecommerce checkouts.",
       version: "1.0.0"
     },
     servers: [
@@ -22,12 +22,12 @@ export async function GET(request: Request) {
     paths: {
       "/api/agent/catalog": {
         get: {
-          summary: "Retrieve Product Catalog",
-          description: "Returns active drops, inventory stock, sizes, and promotional bundle rules.",
+          summary: "Retrieve Product Catalog & Active Growth Manifest",
+          description: "Returns authoritative drops from Postgres, live inventory stock, sizes, colors, and the Merchant Growth Capability Manifest.",
           operationId: "getCatalog",
           responses: {
             "200": {
-              description: "Structured product list for AI parsing.",
+              description: "Structured product list and growth manifest for AI parsing.",
               content: {
                 "application/json": {
                   schema: {
@@ -43,17 +43,42 @@ export async function GET(request: Request) {
                             name: { type: "string" },
                             slug: { type: "string" },
                             price_paise: { type: "integer" },
+                            compare_price_inr: { type: ["number", "null"] },
                             category: { type: "string" },
                             stock: { type: "integer" },
                             sizes: { type: "array", items: { type: "string" } },
-                            colorways: { type: "array", items: { type: "string" } },
-                            description: { type: "string" },
+                            colors: { type: "array", items: { type: "string" } },
+                            images: { type: "array", items: { type: "string" } },
+                            ai_summary: { type: "string" },
                             negotiable: { type: "boolean" },
                             negotiation_policy: {
                               type: "object",
                               properties: {
                                 max_allowed_discount_pct: { type: "integer" },
                                 quote_endpoint: { type: "string" }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      merchant_capability_manifest: {
+                        type: "object",
+                        properties: {
+                          policy_version: { type: "string" },
+                          max_autonomous_cap_paise: { type: "integer" },
+                          quote_ttl_seconds: { type: "integer" },
+                          mandate_required: { type: "boolean" },
+                          active_growth_rules: {
+                            type: "array",
+                            items: {
+                              type: "object",
+                              properties: {
+                                id: { type: "string" },
+                                name: { type: "string" },
+                                type: { type: "string" },
+                                discount_percent: { type: "number" },
+                                product_ids: { type: "array", items: { type: "string" } },
+                                recommendation_reason: { type: "string" }
                               }
                             }
                           }
@@ -69,8 +94,8 @@ export async function GET(request: Request) {
       },
       "/api/agent/quote": {
         post: {
-          summary: "Submit Programmatic Bid",
-          description: "Submits an autonomous bid price for a specific product. Checks merchant policies and returns a signed quote_id if accepted.",
+          summary: "Submit Programmatic Bid & Request Signed Quote",
+          description: "Submits an autonomous bid price for a product. Verifies merchant policy boundaries and returns an HMAC-SHA256 signed quote token with TTL expiry.",
           operationId: "submitBid",
           requestBody: {
             required: true,
@@ -82,7 +107,10 @@ export async function GET(request: Request) {
                   properties: {
                     product_id: { type: "string" },
                     bid_price_paise: { type: "integer" },
-                    size: { type: "string" }
+                    size: { type: "string" },
+                    quantity: { type: "integer", default: 1 },
+                    cart_id: { type: "string", default: "default_cart" },
+                    session_id: { type: "string" }
                   }
                 }
               }
@@ -90,7 +118,7 @@ export async function GET(request: Request) {
           },
           responses: {
             "200": {
-              description: "Bid accepted. Returns signed quote token.",
+              description: "Bid accepted. Returns signed HMAC quote token.",
               content: {
                 "application/json": {
                   schema: {
@@ -98,75 +126,26 @@ export async function GET(request: Request) {
                     properties: {
                       status: { type: "string" },
                       quote_id: { type: "string" },
-                      agreed_price_paise: { type: "integer" }
+                      policy_version: { type: "string" },
+                      product_id: { type: "string" },
+                      agreed_price_paise: { type: "integer" },
+                      currency: { type: "string" },
+                      expires_at: { type: "string" }
                     }
                   }
                 }
               }
             },
             "422": {
-              description: "Bid rejected (too low or out of stock)."
-            }
-          }
-        }
-      },
-      "/api/agent/chat": {
-        post: {
-          summary: "Negotiate Cart Quote",
-          description: "Submits dialogue messages to merchant AI clerk to negotiate colorways, sizes, and bundle discounts.",
-          operationId: "negotiateOrder",
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  required: ["messages"],
-                  properties: {
-                    messages: {
-                      type: "array",
-                      items: {
-                        type: "object",
-                        properties: {
-                          role: { type: "string", enum: ["user", "assistant", "system"] },
-                          content: { type: "string" }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          responses: {
-            "200": {
-              description: "AI Clerk response and structured cart proposal.",
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    properties: {
-                      reply: { type: "string" },
-                      cart: {
-                        type: "object",
-                        properties: {
-                          items: { type: "array" },
-                          total_price_paise: { type: "integer" }
-                        }
-                      },
-                      logs: { type: "array", items: { type: "string" } }
-                    }
-                  }
-                }
-              }
+              description: "Bid rejected (below minimum margin floor or product out of stock)."
             }
           }
         }
       },
       "/api/razorpay/order": {
         post: {
-          summary: "Secure Checkout Payment",
-          description: "Executes final transaction checking budget caps, price integrity, and atomic stock reservation.",
+          summary: "Autonomous Zero-Click Checkout",
+          description: "Executes final order creation evaluating 8 server-side security gates, atomic inventory allocation, and Razorpay payment rails.",
           operationId: "executeCheckout",
           requestBody: {
             required: true,
@@ -174,20 +153,35 @@ export async function GET(request: Request) {
               "application/json": {
                 schema: {
                   type: "object",
-                  required: ["items", "budget_cap_paise", "expected_total_paise"],
+                  required: ["items"],
                   properties: {
                     items: {
                       type: "array",
                       items: {
                         type: "object",
+                        required: ["id", "quantity"],
                         properties: {
                           id: { type: "string" },
-                          quantity: { type: "integer" }
+                          quantity: { type: "integer" },
+                          size: { type: "string" },
+                          color: { type: "string" }
                         }
                       }
                     },
-                    budget_cap_paise: { type: "integer" },
-                    expected_total_paise: { type: "integer" }
+                    expected_total_paise: { type: "integer" },
+                    quote_id: { type: "string" },
+                    cart_id: { type: "string" },
+                    mandate_authorized: { type: "boolean" },
+                    buyer_context: {
+                      type: "object",
+                      properties: {
+                        is_new_buyer: { type: "boolean" },
+                        completed_orders_count: { type: "integer" },
+                        has_failed_payment: { type: "boolean" }
+                      }
+                    },
+                    session_id: { type: "string" },
+                    idempotency_key: { type: "string" }
                   }
                 }
               }
@@ -204,14 +198,16 @@ export async function GET(request: Request) {
                       status: { type: "string" },
                       order_id: { type: "string" },
                       amount_paise: { type: "integer" },
-                      receipt: { type: "string" }
+                      currency: { type: "string" },
+                      receipt: { type: "string" },
+                      payment_link_url: { type: "string" }
                     }
                   }
                 }
               }
             },
             "422": {
-              description: "Validation failure (budget exceeded, stock out, or price tampered).",
+              description: "Validation failure (budget exceeded, stock out, or price mismatch).",
               content: {
                 "application/json": {
                   schema: {
@@ -220,7 +216,10 @@ export async function GET(request: Request) {
                       status: { type: "string" },
                       error: { type: "string" },
                       details: { type: "string" },
-                      alternatives: { type: "array" }
+                      alternatives: {
+                        type: "array",
+                        items: { type: "string" }
+                      }
                     }
                   }
                 }
@@ -268,8 +267,8 @@ export async function GET(request: Request) {
       },
       "/api/agent/ledger": {
         get: {
-          summary: "View Trust Ledger Logs",
-          description: "Returns the complete history of autonomous commerce transactions and security decision events.",
+          summary: "View Trust Ledger Audit Logs",
+          description: "Returns the complete history of autonomous commerce transactions, gate evaluations, and security decision traces.",
           operationId: "getTrustLedger",
           responses: {
             "200": {
@@ -288,12 +287,15 @@ export async function GET(request: Request) {
                             timestamp: { type: "string" },
                             actor: { type: "string" },
                             action: { type: "string" },
-                            quote_id: { type: "string", nullable: true },
-                            order_id: { type: "string", nullable: true },
-                            amount_before: { type: "number", nullable: true },
-                            amount_after: { type: "number", nullable: true },
+                            session_id: { type: ["string", "null"] },
+                            cart_id: { type: ["string", "null"] },
+                            quote_id: { type: ["string", "null"] },
+                            order_id: { type: ["string", "null"] },
+                            policy_version: { type: ["string", "null"] },
+                            amount_before: { type: ["number", "null"] },
+                            amount_after: { type: ["number", "null"] },
                             policy_result: { type: "string" },
-                            reason_code: { type: "string", nullable: true },
+                            reason_code: { type: ["string", "null"] },
                             outcome: { type: "string" }
                           }
                         }
@@ -308,8 +310,8 @@ export async function GET(request: Request) {
       },
       "/api/merchant/config": {
         get: {
-          summary: "Retrieve Merchant Configurations",
-          description: "Returns the current global agent policies, outfit bundle rules, and product negotiation overrides.",
+          summary: "Retrieve Merchant Configurations & Policy Versions",
+          description: "Returns the current global agent policies, growth rules, and product negotiation overrides.",
           operationId: "getMerchantConfig",
           responses: {
             "200": {
@@ -318,8 +320,8 @@ export async function GET(request: Request) {
           }
         },
         post: {
-          summary: "Save Merchant Configurations",
-          description: "Updates global agent boundaries and executes server-side validated product price/stock writes to database.",
+          summary: "Save Merchant Configurations & Create Immutable Snapshot",
+          description: "Updates global agent boundaries, publishes growth rules, and records a permanent version snapshot.",
           operationId: "saveMerchantConfig",
           requestBody: {
             required: true,
@@ -329,7 +331,18 @@ export async function GET(request: Request) {
                   type: "object",
                   properties: {
                     config: { type: "object" },
-                    products: { type: "array" },
+                    products: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          id: { type: "string" },
+                          price_paise: { type: "integer" },
+                          stock: { type: "integer" },
+                          active: { type: "boolean" }
+                        }
+                      }
+                    },
                     change_summary: { type: "string" },
                     rollback_version: { type: "string" }
                   }
@@ -347,11 +360,63 @@ export async function GET(request: Request) {
           }
         }
       },
+      "/api/merchant/policy/{version}/performance": {
+        get: {
+          summary: "Retrieve Policy Version Performance Analytics",
+          description: "Returns immutable configuration and derived business performance metrics (revenue, orders, AOV, buyer savings, quotes) for a specific policy snapshot.",
+          operationId: "getPolicyVersionPerformance",
+          parameters: [
+            {
+              name: "version",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+              description: "The policy version tag (e.g., v1, v2)."
+            }
+          ],
+          responses: {
+            "200": {
+              description: "Performance metrics for the requested policy version returned successfully."
+            },
+            "404": {
+              description: "Policy version not found."
+            }
+          }
+        }
+      },
       "/api/protocol/adapter": {
+        get: {
+          summary: "Protocol Compatibility Adapter (GET)",
+          description: "Returns protocol-shaped catalog, manifest, or service discovery envelopes for ACP, AP2, or x402 agents.",
+          operationId: "protocolAdapterGet",
+          parameters: [
+            {
+              name: "protocol",
+              in: "query",
+              required: true,
+              schema: { type: "string", enum: ["acp-shaped", "ap2-shaped", "x402-shaped"] }
+            },
+            {
+              name: "action",
+              in: "query",
+              schema: { type: "string" }
+            },
+            {
+              name: "endpoint",
+              in: "query",
+              schema: { type: "string" }
+            }
+          ],
+          responses: {
+            "200": {
+              description: "Protocol-wrapped catalog or manifest response."
+            }
+          }
+        },
         post: {
-          summary: "Protocol-Shaped Compatibility Gateway",
+          summary: "Protocol Compatibility Adapter (POST)",
           description: "Unified envelope adapter accepting acp-shaped, ap2-shaped, and x402-shaped requests and executing on the authoritative ZeroClick safety engine.",
-          operationId: "protocolAdapter",
+          operationId: "protocolAdapterPost",
           requestBody: {
             required: true,
             content: {
