@@ -5,8 +5,8 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const events = getAuditEvents();
-    const journeys = getGroupedJourneys();
+    const events = await getAuditEvents();
+    const journeys = await getGroupedJourneys();
     return NextResponse.json(
       { status: "success", events, journeys },
       {

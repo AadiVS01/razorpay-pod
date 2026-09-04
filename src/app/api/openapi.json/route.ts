@@ -119,19 +119,51 @@ export async function GET(request: Request) {
           },
           responses: {
             "200": {
-              description: "Bid accepted. Returns signed HMAC quote token.",
+              description: "Bid accepted. Returns signed HMAC quote token for the complete cart.",
               content: {
                 "application/json": {
                   schema: {
                     type: "object",
                     properties: {
                       status: { type: "string" },
-                      quote_id: { type: "string" },
+                      quote_id: { type: "string", description: "Cryptographically signed HMAC-SHA256 quote token" },
                       policy_version: { type: "string" },
                       product_id: { type: "string" },
-                      agreed_price_paise: { type: "integer" },
+                      quantity: { type: "integer" },
+                      unit_price_paise: { type: "integer", description: "Authoritative price of single unit" },
+                      subtotal_paise: { type: "integer", description: "Authoritative subtotal (unit_price * quantity)" },
+                      discount_paise: { type: "integer", description: "Total discount applied" },
+                      agreed_price_paise: { type: "integer", description: "Final cart total for the complete order" },
                       currency: { type: "string" },
-                      expires_at: { type: "string" }
+                      expires_at: { type: "string" },
+                      applied_rules: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            rule_id: { type: "string" },
+                            rule_name: { type: "string" },
+                            rule_type: { type: "string" },
+                            discount_paise: { type: "integer" },
+                            reason: { type: "string" }
+                          }
+                        }
+                      },
+                      excluded_rules: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            rule_id: { type: "string" },
+                            rule_name: { type: "string" },
+                            rule_type: { type: "string" },
+                            potential_discount_paise: { type: "integer" },
+                            reason: { type: "string" }
+                          }
+                        }
+                      },
+                      paid_quantity: { type: "integer" },
+                      free_quantity: { type: "integer" }
                     }
                   }
                 }
@@ -169,9 +201,9 @@ export async function GET(request: Request) {
                         }
                       }
                     },
-                    expected_total_paise: { type: "integer" },
-                    quote_id: { type: "string" },
-                    cart_id: { type: "string" },
+                    expected_total_paise: { type: "integer", description: "Authoritative final cart total in paise after all growth rules, quantities, and discounts" },
+                    quote_id: { type: "string", description: "Cryptographically signed HMAC quote token (required if order was quoted/negotiated)" },
+                    cart_id: { type: "string", description: "Unique cart session identifier matching the quote token scope" },
                     mandate_authorized: { type: "boolean" },
                     buyer_context: {
                       type: "object",

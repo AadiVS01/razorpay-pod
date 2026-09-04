@@ -189,7 +189,7 @@ export function evaluateGrowthRules(
 
     // 1. Check Buyer Eligibility
     if (rule.buyer_eligibility === "new_buyer") {
-      const isNew = buyerContext.is_new_buyer ?? (buyerContext.completed_orders_count === 0 || buyerContext.completed_orders_count === undefined);
+      const isNew = buyerContext.is_new_buyer === true || (buyerContext.completed_orders_count !== undefined && buyerContext.completed_orders_count === 0);
       if (!isNew) continue;
     }
 
@@ -258,7 +258,7 @@ export function evaluateGrowthRules(
       }
 
       case "welcome_offer": {
-        const isNew = buyerContext.is_new_buyer ?? (buyerContext.completed_orders_count === 0 || buyerContext.completed_orders_count === undefined);
+        const isNew = buyerContext.is_new_buyer === true || (buyerContext.completed_orders_count !== undefined && buyerContext.completed_orders_count === 0);
         if (isNew) {
           if (rule.discount_percent) {
             ruleDiscountPaise = Math.round((subtotalPaise * rule.discount_percent) / 100);

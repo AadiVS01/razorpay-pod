@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAgentCatalog } from "@/lib/catalog-service";
 import { getMerchantConfig, getActivePolicyVersion } from "@/lib/merchant-config";
 import { getAdminSupabase, supabasePublic } from "@/lib/supabase";
-import { logAuditEvent } from "@/lib/audit-ledger";
+import { appendAuditEvent } from "@/lib/audit-ledger";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -161,7 +161,7 @@ export async function POST(request: NextRequest) {
       const hmac = crypto.createHmac("sha256", secret).update(message).digest("hex");
       const quoteId = `quote_${Buffer.from(`${message}:${hmac}`).toString("base64")}`;
 
-      logAuditEvent({
+      await appendAuditEvent({
         actor: "Merchant Revenue Agent",
         action: "QUOTE_ISSUED",
         session_id,

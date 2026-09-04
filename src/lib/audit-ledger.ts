@@ -1,5 +1,4 @@
-import fs from "fs";
-import path from "path";
+import { getAdminSupabase, supabasePublic } from "@/lib/supabase";
 
 export interface AuditArithmetic {
   subtotal: number;
@@ -10,6 +9,8 @@ export interface AuditArithmetic {
 }
 
 export interface AuditEvent {
+  id?: string;
+  event_id?: string;
   timestamp: string;
   actor: "AI Buyer Agent" | "Merchant Revenue Agent" | "Gateway" | "Customer";
   action:
@@ -27,6 +28,7 @@ export interface AuditEvent {
   cart_id?: string | null;
   quote_id?: string | null;
   order_id?: string | null;
+  product_id?: string | null;
   policy_version?: string | null;
   amount_before?: number | null; // in INR
   amount_after?: number | null;  // in INR
@@ -69,62 +71,150 @@ export interface AgentJourney {
   };
 }
 
-const ledgerDir = path.join(process.cwd(), "src/data");
-const ledgerPath = path.join(ledgerDir, "trust-ledger.json");
+// In-memory fallback event cache for resilient local and transient operations
+const inMemoryEvents: AuditEvent[] = [];
 
 /**
- * Initializes the ledger file if it does not exist
+ * Appends a new audited event to Supabase trust_ledger_events table (Zero filesystem dependency)
  */
-function initLedger() {
-  if (!fs.existsSync(ledgerDir)) {
-    fs.mkdirSync(ledgerDir, { recursive: true });
+export async function appendAuditEvent(
+  event: Omit<AuditEvent, "timestamp"> & { timestamp?: string; event_id?: string }
+): Promise<{ success: boolean; event_id: string; error?: string }> {
+  const timestamp = event.timestamp || new Date().toISOString();
+  const event_id =
+    event.event_id ||
+    `evt_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  const journey_id =
+    event.session_id ||
+    event.order_id ||
+    event.cart_id ||
+    event.quote_id ||
+    `journey_${Date.now()}`;
+
+  let amount_paise: number | null = null;
+  if (event.amount_after !== undefined && event.amount_after !== null) {
+    amount_paise = Math.round(event.amount_after * 100);
+  } else if (event.amount_before !== undefined && event.amount_before !== null) {
+    amount_paise = Math.round(event.amount_before * 100);
   }
-  if (!fs.existsSync(ledgerPath)) {
-    fs.writeFileSync(ledgerPath, JSON.stringify([], null, 2), "utf-8");
+
+  const fullEvent: AuditEvent = {
+    ...event,
+    event_id,
+    timestamp
+  };
+
+  // Upsert into in-memory buffer
+  const existingIdx = inMemoryEvents.findIndex(e => e.event_id === event_id);
+  if (existingIdx >= 0) {
+    inMemoryEvents[existingIdx] = fullEvent;
+  } else {
+    inMemoryEvents.unshift(fullEvent);
+    if (inMemoryEvents.length > 500) {
+      inMemoryEvents.pop();
+    }
   }
+
+  try {
+    const supabase = getAdminSupabase() || supabasePublic;
+    if (supabase) {
+      const { error } = await supabase.from("trust_ledger_events").upsert(
+        {
+          event_id,
+          event_type: event.action,
+          journey_id,
+          session_id: event.session_id || null,
+          cart_id: event.cart_id || null,
+          order_id: event.order_id || null,
+          quote_id: event.quote_id || null,
+          product_id: event.product_id || null,
+          policy_version: event.policy_version || "v1",
+          status: event.outcome,
+          error_code: event.reason_code,
+          amount_paise,
+          currency: "INR",
+          payload: fullEvent,
+          created_at: timestamp
+        },
+        { onConflict: "event_id" }
+      );
+
+      if (error) {
+        console.warn("⚠️ [LEDGER] Supabase write notice (cached in memory):", error.message);
+        return { success: true, event_id, error: error.message };
+      }
+
+      console.log(`📜 [LEDGER] [SUPABASE] Persisted "${event.action}" | Result: ${event.policy_result} | Reason: ${event.reason_code} | Event ID: ${event_id}`);
+      return { success: true, event_id };
+    }
+  } catch (err: any) {
+    console.warn("⚠️ [LEDGER] Supabase persistence exception (fallback to in-memory):", err?.message);
+    return { success: true, event_id, error: err?.message };
+  }
+
+  console.log(`📜 [LEDGER] [MEMORY] Buffered "${event.action}" | Result: ${event.policy_result} | ID: ${event_id}`);
+  return { success: true, event_id };
 }
 
-/**
- * Appends a new audited event to the Trust Ledger file
- */
-export function logAuditEvent(event: Omit<AuditEvent, "timestamp">) {
-  try {
-    initLedger();
-    const data = fs.readFileSync(ledgerPath, "utf-8");
-    const ledger: AuditEvent[] = JSON.parse(data);
-
-    const newEvent: AuditEvent = {
-      timestamp: new Date().toISOString(),
-      ...event
-    };
-
-    ledger.push(newEvent);
-    fs.writeFileSync(ledgerPath, JSON.stringify(ledger, null, 2), "utf-8");
-    console.log(`📜 [LEDGER] Logged action "${event.action}" | Result: ${event.policy_result} | Reason: ${event.reason_code}`);
-  } catch (err) {
-    console.error("❌ [LEDGER] Failed to write audit event:", err);
-  }
-}
+// Backward-compatible alias for existing imports
+export const logAuditEvent = appendAuditEvent;
 
 /**
- * Retrieves all events from the Trust Ledger
+ * Retrieves all events from Supabase trust_ledger_events (ordered newest first)
  */
-export function getAuditEvents(): AuditEvent[] {
+export async function getAuditEvents(): Promise<AuditEvent[]> {
   try {
-    initLedger();
-    const data = fs.readFileSync(ledgerPath, "utf-8");
-    return JSON.parse(data);
-  } catch (err) {
-    console.error("❌ [LEDGER] Failed to read audit events:", err);
-    return [];
+    const supabase = getAdminSupabase() || supabasePublic;
+    if (supabase) {
+      const { data, error } = await supabase
+        .from("trust_ledger_events")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(300);
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const dbEvents: AuditEvent[] = data.map((row: any) => {
+          const payload =
+            typeof row.payload === "object" && row.payload !== null
+              ? row.payload
+              : {};
+          return {
+            ...payload,
+            id: row.id,
+            event_id: row.event_id,
+            timestamp: row.created_at || payload.timestamp || new Date().toISOString(),
+            action: row.event_type || payload.action,
+            session_id: row.session_id ?? payload.session_id,
+            cart_id: row.cart_id ?? payload.cart_id,
+            order_id: row.order_id ?? payload.order_id,
+            quote_id: row.quote_id ?? payload.quote_id,
+            product_id: row.product_id ?? payload.product_id,
+            policy_version: row.policy_version ?? payload.policy_version,
+            policy_result: payload.policy_result || (row.status === "FAILED" || row.status === "BLOCKED" ? "BLOCKED" : "ALLOWED"),
+            reason_code: row.error_code ?? payload.reason_code,
+            outcome: row.status ?? payload.outcome,
+            actor: payload.actor || "AI Buyer Agent"
+          } as AuditEvent;
+        });
+
+        // Merge any transient in-memory events that might not be in DB yet
+        const dbIds = new Set(dbEvents.map(e => e.event_id).filter(Boolean));
+        const transientOnly = inMemoryEvents.filter(e => e.event_id && !dbIds.has(e.event_id));
+        return [...transientOnly, ...dbEvents];
+      }
+    }
+  } catch (err: any) {
+    console.warn("⚠️ [LEDGER] Could not query Supabase trust_ledger_events (using in-memory cache):", err?.message);
   }
+
+  return inMemoryEvents;
 }
 
 /**
  * Groups raw Trust Ledger events into coherent, end-to-end Agent Activity Journeys
  */
-export function getGroupedJourneys(): AgentJourney[] {
-  const events = getAuditEvents();
+export async function getGroupedJourneys(): Promise<AgentJourney[]> {
+  const events = await getAuditEvents();
   const journeyMap = new Map<string, AuditEvent[]>();
 
   for (const event of events) {
@@ -161,6 +251,8 @@ export function getGroupedJourneys(): AgentJourney[] {
     evList.forEach(e => {
       if (e.details && e.details.includes("Argentina")) matchedProducts.push("Argentina Sun Of May Tee");
       if (e.details && e.details.includes("Pants")) matchedProducts.push("Relaxed Cotton Pants");
+      if (e.details && e.details.includes("Socks")) matchedProducts.push("Streetwear Crew Socks (3-Pack)");
+      if (e.details && e.details.includes("Cap")) matchedProducts.push("Essential Streetwear Cap");
     });
     const uniqueProducts = Array.from(new Set(matchedProducts));
     if (uniqueProducts.length === 0) uniqueProducts.push("Argentina Sun Of May Tee");
@@ -218,3 +310,4 @@ export function getGroupedJourneys(): AgentJourney[] {
 
   return journeys.reverse();
 }
+

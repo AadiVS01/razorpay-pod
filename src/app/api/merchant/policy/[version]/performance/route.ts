@@ -16,7 +16,7 @@ export async function GET(
       );
     }
 
-    const performanceData = getPolicyPerformance(version);
+    const performanceData = await getPolicyPerformance(version);
     if (!performanceData) {
       return NextResponse.json(
         { status: "error", error: "POLICY_VERSION_NOT_FOUND", details: `Policy version "${version}" does not exist.` },

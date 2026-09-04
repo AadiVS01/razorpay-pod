@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSupabase, supabasePublic } from "@/lib/supabase";
-import { logAuditEvent } from "@/lib/audit-ledger";
+import { appendAuditEvent } from "@/lib/audit-ledger";
 
 export const dynamic = "force-dynamic";
 
@@ -156,7 +156,7 @@ export async function POST(request: NextRequest) {
       .eq("razorpay_order_id", order_id);
 
     // Log event to Trust Ledger
-    logAuditEvent({
+    await appendAuditEvent({
       actor: "Gateway",
       action: "STOCK_RESTORATION",
       quote_id: null,

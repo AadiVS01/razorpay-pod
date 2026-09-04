@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { GrowthRule } from "./growth-engine";
+import { getAuditEvents } from "./audit-ledger";
 
 export interface MerchantPolicy {
   max_autonomous_checkout_paise: number;
@@ -270,14 +271,18 @@ const INITIAL_VERSION: PolicyVersionSnapshot = {
 };
 
 function ensureFilesExist(): void {
-  if (!fs.existsSync(configDir)) {
-    fs.mkdirSync(configDir, { recursive: true });
-  }
-  if (!fs.existsSync(configPath)) {
-    fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2), "utf-8");
-  }
-  if (!fs.existsSync(versionsPath)) {
-    fs.writeFileSync(versionsPath, JSON.stringify([INITIAL_VERSION], null, 2), "utf-8");
+  try {
+    if (!fs.existsSync(configDir)) {
+      fs.mkdirSync(configDir, { recursive: true });
+    }
+    if (!fs.existsSync(configPath)) {
+      fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2), "utf-8");
+    }
+    if (!fs.existsSync(versionsPath)) {
+      fs.writeFileSync(versionsPath, JSON.stringify([INITIAL_VERSION], null, 2), "utf-8");
+    }
+  } catch (err) {
+    // Gracefully ignore EROFS in read-only serverless environments
   }
 }
 
@@ -479,7 +484,7 @@ export function rollbackToVersion(targetVersionId: string): PolicyVersionSnapsho
 /**
  * Derives business performance metrics attributable to activity under a specific policy version
  */
-export function getPolicyPerformance(versionTag: string) {
+export async function getPolicyPerformance(versionTag: string) {
   ensureFilesExist();
   const versions = getPolicyVersions();
   const snapshot = versions.find(v => v.version.toLowerCase() === versionTag.toLowerCase());
@@ -489,10 +494,7 @@ export function getPolicyPerformance(versionTag: string) {
 
   let events: any[] = [];
   try {
-    if (fs.existsSync(ledgerPath)) {
-      const data = fs.readFileSync(ledgerPath, "utf-8");
-      events = JSON.parse(data);
-    }
+    events = await getAuditEvents();
   } catch (err) {
     console.warn("⚠️ [POLICY_PERFORMANCE] Failed to read ledger:", err);
   }

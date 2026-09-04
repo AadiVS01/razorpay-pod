@@ -1,81 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSupabase, supabasePublic } from "@/lib/supabase";
-import { logAuditEvent } from "@/lib/audit-ledger";
+import { appendAuditEvent, logAuditEvent } from "@/lib/audit-ledger";
 import { getMerchantConfig, getActivePolicyVersion } from "@/lib/merchant-config";
-import { evaluateGrowthRules, BuyerContext, EvaluatedItem } from "@/lib/growth-engine";
+import { calculateCartPricing, verifyQuoteToken } from "@/lib/cart-pricing";
 import Razorpay from "razorpay";
-import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
-
-/**
- * Calculates correct cart pricing based on DB products and growth rules
- */
-async function calculateCartTotal(
-  items: Array<{ id: string; quantity: number }>,
-  buyerContext: BuyerContext = {}
-) {
-  const supabase = getAdminSupabase() || supabasePublic;
-  if (!supabase) throw new Error("Database client unavailable");
-
-  // Fetch live product rows from Supabase
-  const productIds = items.map((item) => item.id);
-  const { data: dbProducts, error } = await supabase
-    .from("products")
-    .select("*")
-    .in("id", productIds);
-
-  if (error || !dbProducts || dbProducts.length === 0) {
-    throw new Error("Failed to retrieve products from database");
-  }
-
-  const itemDetails: EvaluatedItem[] = items.map((item) => {
-    const product = dbProducts.find((p) => p.id === item.id);
-    if (!product) throw new Error(`Product ID ${item.id} not found in catalog`);
-
-    return {
-      product: {
-        id: product.id,
-        name: product.name,
-        price: product.price,
-        cost_paise: product.price * 0.4, // estimated cost for margin floor calculation
-        stock: product.stock,
-        category: product.category,
-        sizes: product.sizes,
-        images: product.images
-      },
-      quantity: item.quantity,
-      price_paise: product.price,
-    };
-  });
-
-  const config = getMerchantConfig();
-
-  // Evaluate growth rules deterministically
-  const growthResult = evaluateGrowthRules(
-    itemDetails,
-    config.growth_rules || [],
-    buyerContext,
-    {
-      max_discount_percent: config.policy.max_discount_percent ?? 25,
-      margin_floor_percent: config.policy.margin_floor_percent ?? 60,
-      max_autonomous_checkout_paise: config.policy.max_autonomous_checkout_paise,
-      promotion_stacking_allowed: config.policy.promotion_stacking_allowed ?? false
-    }
-  );
-
-  return {
-    subtotal_paise: growthResult.subtotal_paise,
-    discount_paise: growthResult.discount_paise,
-    total_paise: growthResult.final_total_paise,
-    final_total_paise: growthResult.final_total_paise,
-    buyer_savings_paise: growthResult.buyer_savings_paise,
-    applied_rules: growthResult.applied_rules,
-    free_items: growthResult.free_items,
-    cross_sell_recommendations: growthResult.cross_sell_recommendations,
-    items: itemDetails,
-  };
-}
 
 /**
  * Saves order rows to Supabase database for audit telemetry logging
@@ -88,14 +18,14 @@ async function saveOrderToDb(
   adminNotes: string = ""
 ) {
   try {
-    const totalAmount = pricingItems.reduce((sum, it) => sum + (it.price_paise * it.quantity), 0);
+    const totalAmount = pricingItems.reduce((sum, it) => sum + (it.product.price * it.quantity), 0);
     const totalQuantity = pricingItems.reduce((sum, it) => sum + it.quantity, 0);
     const combinedName = pricingItems.map((it) => `${it.product.name} (x${it.quantity})`).join(" + ");
     const itemsSummary = pricingItems.map((it) => ({
       id: it.product.id,
       name: it.product.name,
       quantity: it.quantity,
-      price_paise: it.price_paise,
+      price_paise: it.product.price,
     }));
 
     const fullNotes = `${adminNotes}|items_json:${JSON.stringify(itemsSummary)}`;
@@ -135,23 +65,40 @@ async function saveOrderToDb(
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { status: "error", error: "INVALID_JSON", details: "Malformed JSON payload in request." },
+        { status: 400 }
+      );
+    }
+
+    if (!body || typeof body !== "object") {
+      return NextResponse.json(
+        { status: "error", error: "INVALID_PAYLOAD", details: "Request body must be a valid JSON object." },
+        { status: 400 }
+      );
+    }
+
     const {
       items,
       budget_cap_paise,
       expected_total_paise,
-      auto_capture = false,
       quote_id,
-      idempotency_key,
-      mandate_authorized = false,
-      session_id = `sess_${Date.now()}`,
       cart_id = "default_cart",
+      session_id = `sess_${Date.now()}`,
+      mandate_authorized,
+      idempotency_key,
+      auto_capture = true,
       buyer_context = {}
-    } = body;
+    } = body || {};
 
     if (!items || !Array.isArray(items) || items.length === 0) {
+      console.error("❌ [SECURITY] Missing or invalid 'items' list in payload.");
       return NextResponse.json(
-        { status: "error", error: "Missing or invalid 'items' list in payload" },
+        { status: "error", error: "MISSING_PARAMETERS", details: "Missing or invalid 'items' list in payload" },
         { status: 400 }
       );
     }
@@ -162,7 +109,7 @@ export async function POST(request: NextRequest) {
 
     // 1. Enforce Global Autonomous Checkout Permission (Gate 1)
     if (!config.policy.agent_can_checkout) {
-      logAuditEvent({
+      await appendAuditEvent({
         actor: "AI Buyer Agent",
         action: "CHECKOUT_BLOCKED",
         session_id,
@@ -184,9 +131,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 2. Enforce Mandate pre-authorization consent (Gate 2)
+    // 2. Enforce Mandate Pre-Authorization Consent (Gate 2)
     if (config.policy.mandate_required && mandate_authorized !== true) {
-      logAuditEvent({
+      await appendAuditEvent({
         actor: "AI Buyer Agent",
         action: "CHECKOUT_BLOCKED",
         session_id,
@@ -220,7 +167,7 @@ export async function POST(request: NextRequest) {
     const requestIdempotencyKey = idempotency_key || `idem_key_${Date.now()}`;
     const uniqueIdemOrderId = `idem_${requestIdempotencyKey}`;
 
-    // 3. Checkout Idempotency Check (P1 - Unique constraint check)
+    // 3. Checkout Idempotency Check
     if (requestIdempotencyKey) {
       const { data: existingOrders, error: exErr } = await supabase
         .from("orders")
@@ -230,7 +177,7 @@ export async function POST(request: NextRequest) {
       if (!exErr && existingOrders && existingOrders.length > 0) {
         console.log(`✅ [IDEMPOTENCY] Reusing existing order for key ${requestIdempotencyKey}`);
         
-        logAuditEvent({
+        await appendAuditEvent({
           actor: "AI Buyer Agent",
           action: "ORDER_CREATED",
           session_id,
@@ -259,102 +206,117 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 4. Price Integrity Guardrail with Growth Rule Engine
+    // 4. Authoritative Cart Pricing Evaluation
     let pricing;
     try {
-      pricing = await calculateCartTotal(items, buyer_context);
-      console.log(`[GUARDRAIL] [PRICE] calculated total: ₹${(pricing.total_paise / 100).toFixed(2)} (Subtotal: ₹${(pricing.subtotal_paise / 100).toFixed(2)}, Discount: ₹${(pricing.discount_paise / 100).toFixed(2)}, Applied Rules: ${pricing.applied_rules.map(r => r.rule_name).join(", ") || "None"})`);
+      pricing = await calculateCartPricing({
+        items,
+        buyerContext: buyer_context,
+        cartId: cart_id,
+        policyVersion: activeVersion,
+      });
+      console.log(`[GUARDRAIL] [PRICE] Authoritative cart total: ₹${(pricing.final_total_paise / 100).toFixed(2)} (Subtotal: ₹${(pricing.subtotal_paise / 100).toFixed(2)}, Discount: ₹${(pricing.discount_paise / 100).toFixed(2)}, Applied Rules: ${pricing.applied_rules.map(r => r.rule_name).join(", ") || "None"})`);
     } catch (pricingErr: any) {
-      console.error(`[GUARDRAIL] [PRICE] pricing check failed: ${pricingErr?.message}`);
+      console.error(`[GUARDRAIL] [PRICE] Pricing check failed: ${pricingErr?.message}`);
       return NextResponse.json(
         { status: "error", error: "PRICING_FAILED", details: pricingErr?.message },
         { status: 400 }
       );
     }
 
-    // 5. Verify Quote ID signature and scope (Cart, Quantity & version validation) (P1)
-    let quotePriceOverride: number | null = null;
-    if (quote_id && quote_id.startsWith("quote_")) {
-      try {
-        const token = quote_id.substring(6);
-        const decoded = Buffer.from(token, "base64").toString("utf-8");
-        const parts = decoded.split(":");
+    // 5. Cryptographic Quote Verification & Scope Matching
+    let quotedFinalTotalPaise: number | null = null;
+    if (quote_id) {
+      const verified = verifyQuoteToken(quote_id);
+      if (!verified.valid || !verified.finalTotalPaise || !verified.policyVersion) {
+        console.warn(`⚠️ [QUOTE_VERIFY_FAILED] Quote token verification failed: ${verified.error}`);
         
-        if (parts.length === 8) {
-          const [qProductId, qPriceStr, qExpiresStr, qSize, qQtyStr, qCartId, qVersion, qHmac] = parts;
-          const secret = process.env.RAZORPAY_KEY_SECRET || "merchant_gateway_secret_key_1029";
-          const verifyMessage = `${qProductId}:${qPriceStr}:${qExpiresStr}:${qSize}:${qQtyStr}:${qCartId}:${qVersion}`;
-          const expectedHmac = crypto.createHmac("sha256", secret).update(verifyMessage).digest("hex");
-          
-          if (expectedHmac === qHmac && Date.now() < parseInt(qExpiresStr) && qVersion) {
-            currentPolicyVersion = qVersion;
-            // Verify cart scope matching
-            const matchedItem = items.find(item => item.id === qProductId);
-            const clientCartId = cart_id || "default_cart";
-            
-            if (!matchedItem || matchedItem.quantity !== parseInt(qQtyStr) || qCartId !== clientCartId) {
-              console.error("❌ [SECURITY] [QUOTE_SCOPE_MISMATCH] Cart items or quantity do not match quote scope.");
-              
-              logAuditEvent({
-                actor: "AI Buyer Agent",
-                action: "CHECKOUT_BLOCKED",
-                session_id,
-                cart_id: clientCartId,
-                quote_id: quote_id,
-                order_id: null,
-                policy_version: qVersion,
-                amount_before: pricing.total_paise / 100,
-                amount_after: null,
-                policy_result: "BLOCKED",
-                reason_code: "PRICE_MISMATCH",
-                outcome: "FAILED",
-                details: "Quote token scope (quantity or cart identity) does not match checkout request.",
-                gate_results: { "Autonomy Gate": "PASS", "Mandate Bound": "PASS", "Quote Scope Match": "FAIL" }
-              });
+        await appendAuditEvent({
+          actor: "AI Buyer Agent",
+          action: "CHECKOUT_BLOCKED",
+          session_id,
+          cart_id,
+          quote_id,
+          order_id: null,
+          policy_version: activeVersion,
+          amount_before: expected_total_paise ? expected_total_paise / 100 : null,
+          amount_after: null,
+          policy_result: "BLOCKED",
+          reason_code: "PRICE_MISMATCH",
+          outcome: "FAILED",
+          details: `Invalid or expired quote token (${verified.error}).`,
+          gate_results: { "Autonomy Gate": "PASS", "Mandate Bound": "PASS", "Quote Scope Match": "FAIL" }
+        });
 
-              return NextResponse.json({
-                status: "error",
-                error: "QUOTE_SCOPE_MISMATCH",
-                details: "The quote token scope (quantity or cart identity) does not match your checkout request."
-              }, { status: 422 });
-            }
-            
-            quotePriceOverride = parseInt(qPriceStr) * matchedItem.quantity;
-            console.log(`✅ [QUOTE_VERIFIED] Valid dynamic quote found under ${qVersion}. Overriding price total to: ₹${(quotePriceOverride / 100).toFixed(2)}`);
-          } else {
-            console.warn("⚠️ [QUOTE_VERIFY_FAILED] Quote token signature mismatch or expired.");
-          }
-        }
-      } catch (quoteErr) {
-        console.error("❌ Error parsing quote token:", quoteErr);
+        return NextResponse.json({
+          status: "error",
+          error: "QUOTE_SCOPE_MISMATCH",
+          details: `Quote token invalid or expired (${verified.error}).`
+        }, { status: 422 });
       }
+
+      currentPolicyVersion = verified.policyVersion;
+      const clientCartId = cart_id || "default_cart";
+      const matchedItem = items.find(item => item.id === verified.productId);
+      const parsedItemQty = matchedItem ? parseInt(String(matchedItem.quantity), 10) : 0;
+
+      // Verify cart scope: product ID, quantity, and cart ID must match exactly
+      if (!matchedItem || parsedItemQty !== verified.quantity || verified.cartId !== clientCartId) {
+        console.error("❌ [SECURITY] [QUOTE_SCOPE_MISMATCH] Cart items or quantity do not match quote scope.");
+        
+        await appendAuditEvent({
+          actor: "AI Buyer Agent",
+          action: "CHECKOUT_BLOCKED",
+          session_id,
+          cart_id: clientCartId,
+          quote_id,
+          order_id: null,
+          policy_version: verified.policyVersion,
+          amount_before: pricing.final_total_paise / 100,
+          amount_after: null,
+          policy_result: "BLOCKED",
+          reason_code: "PRICE_MISMATCH",
+          outcome: "FAILED",
+          details: "Quote token scope (quantity, item identity, or cart ID) does not match checkout request.",
+          gate_results: { "Autonomy Gate": "PASS", "Mandate Bound": "PASS", "Quote Scope Match": "FAIL" }
+        });
+
+        return NextResponse.json({
+          status: "error",
+          error: "QUOTE_SCOPE_MISMATCH",
+          details: "The quote token scope (quantity, item identity, or cart ID) does not match your checkout request."
+        }, { status: 422 });
+      }
+
+      // Quoted total is the authoritative bound total for this cart
+      quotedFinalTotalPaise = verified.finalTotalPaise;
+      console.log(`✅ [QUOTE_VERIFIED] Valid HMAC quote found under ${verified.policyVersion}. Bound Cart Total: ₹${(quotedFinalTotalPaise / 100).toFixed(2)}`);
     }
 
-    if (quotePriceOverride !== null) {
-      pricing.total_paise = quotePriceOverride;
-      pricing.final_total_paise = quotePriceOverride;
-    }
+    // Determine final check total (agreed quoted total or calculated pricing total)
+    const checkTotal = quotedFinalTotalPaise !== null ? quotedFinalTotalPaise : pricing.final_total_paise;
 
-    const checkTotal = quotePriceOverride !== null ? quotePriceOverride : pricing.total_paise;
+    // 6. Enforce Exact Price Integrity Check
     if (expected_total_paise !== undefined && checkTotal !== expected_total_paise) {
-      console.error(`❌ [SECURITY] [PRICE_MISMATCH] client expected: ₹${(expected_total_paise / 100).toFixed(2)}, secure calculated total: ₹${(checkTotal / 100).toFixed(2)}`);
-      console.error(`❌ [SECURITY] Possible prompt injection or tampering blocked.`);
+      console.error(`❌ [SECURITY] [PRICE_MISMATCH] Client expected: ₹${(expected_total_paise / 100).toFixed(2)}, Secure calculated total: ₹${(checkTotal / 100).toFixed(2)}`);
       
-      logAuditEvent({
+      await appendAuditEvent({
         actor: "AI Buyer Agent",
         action: "CHECKOUT_BLOCKED",
         session_id,
         cart_id,
         quote_id: quote_id || null,
         order_id: null,
-        policy_version: currentPolicyVersion || activeVersion,
+        policy_version: currentPolicyVersion,
         amount_before: expected_total_paise / 100,
         amount_after: null,
         policy_result: "BLOCKED",
         reason_code: "PRICE_MISMATCH",
         outcome: "FAILED",
         details: `Requested total (${expected_total_paise} paise) does not match merchant calculated total (${checkTotal} paise). Prompt injection blocked.`,
-        gate_results: { "Autonomy Gate": "PASS", "Mandate Bound": "PASS", "Quote Scope Match": "FAIL" }
+        gate_results: quote_id 
+          ? { "Autonomy Gate": "PASS", "Mandate Bound": "PASS", "Quote Scope Match": "PASS" }
+          : { "Autonomy Gate": "PASS", "Mandate Bound": "PASS" }
       });
 
       return NextResponse.json(
@@ -368,42 +330,8 @@ export async function POST(request: NextRequest) {
     }
     console.log("✅ [GUARDRAIL] [PRICE] Price Integrity verified successfully.");
 
-    // 6. Budget Cap Policy Guardrail
-    const maxCheckoutCap = config.policy.max_autonomous_checkout_paise;
-    console.log(`[GUARDRAIL] [BUDGET] Merchant policy max limit: ₹${(maxCheckoutCap / 100).toFixed(2)}`);
-    if (pricing.total_paise > maxCheckoutCap) {
-      console.error(`❌ [SECURITY] [BUDGET_CAP_EXCEEDED] total ₹${(pricing.total_paise / 100).toFixed(2)} exceeds cap limit ₹${(maxCheckoutCap / 100).toFixed(2)}`);
-      
-      logAuditEvent({
-        actor: "AI Buyer Agent",
-        action: "CHECKOUT_BLOCKED",
-        session_id,
-        cart_id,
-        quote_id: quote_id || null,
-        order_id: null,
-        policy_version: currentPolicyVersion || activeVersion,
-        amount_before: pricing.total_paise / 100,
-        amount_after: null,
-        policy_result: "BLOCKED",
-        reason_code: "BUDGET_EXCEEDED",
-        outcome: "FAILED",
-        details: `Order total of ₹${(pricing.total_paise / 100).toFixed(2)} exceeds the merchant pre-configured budget cap limit of ₹${(maxCheckoutCap / 100).toFixed(2)}.`,
-        gate_results: { "Autonomy Gate": "PASS", "Mandate Bound": "PASS", "Budget Cap Gate": "FAIL" }
-      });
-
-      return NextResponse.json(
-        {
-          status: "error",
-          error: "BUDGET_CAP_EXCEEDED",
-          details: `Order total of ₹${(pricing.total_paise / 100).toFixed(2)} exceeds the merchant pre-configured budget cap limit of ₹${(maxCheckoutCap / 100).toFixed(2)}.`
-        },
-        { status: 422 }
-      );
-    }
-    console.log("✅ [GUARDRAIL] [BUDGET] Budget bounds verified successfully.");
-
-    // 7. Atomic Stock Allocation (P1 - Concurrency-Safe)
-    for (const item of pricing.items) {
+    // 7. Inventory Stock Pre-Verification Guardrail
+    for (const item of pricing.evaluated_items) {
       console.log(`[GUARDRAIL] [STOCK] Checking inventory for "${item.product.name}"...`);
       const { data: prod, error: getErr } = await supabase
         .from("products")
@@ -411,27 +339,10 @@ export async function POST(request: NextRequest) {
         .eq("id", item.product.id)
         .single();
 
-      if (getErr || !prod) {
-        console.error(`❌ [GUARDRAIL] [STOCK] Stock query failed for ${item.product.name}`);
-        return NextResponse.json(
-          { status: "error", error: "STOCK_CHECK_FAILED" },
-          { status: 400 }
-        );
-      }
-
-      // Concurrency-Safe Conditional Stock Update
-      console.log(`[GUARDRAIL] [STOCK] Executing atomic conditional decrement for "${item.product.name}"...`);
-      const { data: updatedRows, error: updateErr } = await supabase
-        .from("products")
-        .update({ stock: prod.stock - item.quantity })
-        .eq("id", item.product.id)
-        .gte("stock", item.quantity)
-        .select();
-
-      if (updateErr || !updatedRows || updatedRows.length === 0) {
-        console.error(`❌ [SECURITY] [STOCK_OUT] Atomic check failed. "${item.product.name}" stock depleted or locked.`);
+      if (getErr || !prod || prod.stock < item.quantity) {
+        console.error(`❌ [SECURITY] [STOCK_OUT] Product "${item.product.name}" stock insufficient (${prod?.stock ?? 0} available, ${item.quantity} requested).`);
         
-        logAuditEvent({
+        await appendAuditEvent({
           actor: "AI Buyer Agent",
           action: "CHECKOUT_BLOCKED",
           session_id,
@@ -439,7 +350,88 @@ export async function POST(request: NextRequest) {
           quote_id: quote_id || null,
           order_id: null,
           policy_version: currentPolicyVersion,
-          amount_before: pricing.total_paise / 100,
+          amount_before: checkTotal / 100,
+          amount_after: null,
+          policy_result: "BLOCKED",
+          reason_code: "OUT_OF_STOCK",
+          outcome: "FAILED",
+          details: `Cannot fulfill order. Product "${item.product.name}" has insufficient stock.`,
+          gate_results: { "Autonomy Gate": "PASS", "Mandate Bound": "PASS", "Inventory Stock Gate": "FAIL" }
+        });
+
+        return NextResponse.json(
+          {
+            status: "error",
+            error: "INVENTORY_STOCK_OUT",
+            details: `Cannot fulfill order. Product "${item.product.name}" has insufficient stock.`
+          },
+          { status: 422 }
+        );
+      }
+    }
+
+    // 8. Budget Cap Policy Guardrail
+    const maxCheckoutCap = config.policy.max_autonomous_checkout_paise;
+    if (checkTotal > maxCheckoutCap) {
+      console.error(`❌ [SECURITY] [BUDGET_CAP_EXCEEDED] Total ₹${(checkTotal / 100).toFixed(2)} exceeds cap limit ₹${(maxCheckoutCap / 100).toFixed(2)}`);
+      
+      await appendAuditEvent({
+        actor: "AI Buyer Agent",
+        action: "CHECKOUT_BLOCKED",
+        session_id,
+        cart_id,
+        quote_id: quote_id || null,
+        order_id: null,
+        policy_version: currentPolicyVersion,
+        amount_before: checkTotal / 100,
+        amount_after: null,
+        policy_result: "BLOCKED",
+        reason_code: "BUDGET_EXCEEDED",
+        outcome: "FAILED",
+        details: `Order total of ₹${(checkTotal / 100).toFixed(2)} exceeds the merchant pre-configured budget cap limit of ₹${(maxCheckoutCap / 100).toFixed(2)}.`,
+        gate_results: { "Autonomy Gate": "PASS", "Mandate Bound": "PASS", "Budget Cap Gate": "FAIL" }
+      });
+
+      return NextResponse.json(
+        {
+          status: "error",
+          error: "BUDGET_CAP_EXCEEDED",
+          details: `Order total of ₹${(checkTotal / 100).toFixed(2)} exceeds the merchant pre-configured budget cap limit of ₹${(maxCheckoutCap / 100).toFixed(2)}.`
+        },
+        { status: 422 }
+      );
+    }
+    console.log("✅ [GUARDRAIL] [BUDGET] Budget bounds verified successfully.");
+
+    // 9. Atomic Stock Allocation (Concurrency-Safe)
+    for (const item of pricing.evaluated_items) {
+      console.log(`[GUARDRAIL] [STOCK] Executing atomic conditional decrement for "${item.product.name}"...`);
+      const { data: prod } = await supabase
+        .from("products")
+        .select("stock")
+        .eq("id", item.product.id)
+        .single();
+
+      const currentStock = prod?.stock ?? item.product.stock;
+      const { data: updatedRows, error: updateErr } = await supabase
+        .from("products")
+        .update({ stock: Math.max(0, currentStock - item.quantity) })
+        .eq("id", item.product.id)
+        .gte("stock", item.quantity)
+        .select();
+
+      if (updateErr || !updatedRows || updatedRows.length === 0) {
+        console.error(`❌ [SECURITY] [STOCK_OUT] Atomic check failed. "${item.product.name}" stock depleted or locked.`);
+        
+        await appendAuditEvent({
+          actor: "AI Buyer Agent",
+          action: "CHECKOUT_BLOCKED",
+          session_id,
+          cart_id,
+          quote_id: quote_id || null,
+          order_id: null,
+          policy_version: currentPolicyVersion,
+          amount_before: checkTotal / 100,
           amount_after: null,
           policy_result: "BLOCKED",
           reason_code: "OUT_OF_STOCK",
@@ -464,11 +456,11 @@ export async function POST(request: NextRequest) {
 
     console.log("✅ [GUARDRAIL] All checkout security rails cleared. Initiating payment creation...");
 
-    // 8. Razorpay Test Rails Checkout & Idempotency persistence
+    // 9. Payment Execution & Persistence (Using EXACT final checkTotal)
     const keyId = process.env.RAZORPAY_KEY_ID;
     const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
-    const actualRzpTotal = pricing.total_paise;
+    const actualRzpTotal = checkTotal;
     const adminNotes = `idempotency_key:${requestIdempotencyKey || ""}|quote_id:${quote_id || ""}|rules:${pricing.applied_rules.map(r => r.rule_id).join(",")}`;
 
     const auditArithmetic = {
@@ -480,10 +472,10 @@ export async function POST(request: NextRequest) {
     };
 
     if (!keyId || !keySecret || keyId === "rzp_test_placeholder") {
-      await saveOrderToDb(supabase, uniqueIdemOrderId, pricing.items, auto_capture ? "paid" : "created", adminNotes);
+      await saveOrderToDb(supabase, uniqueIdemOrderId, pricing.evaluated_items, auto_capture ? "paid" : "created", adminNotes);
       console.log(`🎉 [PAYMENT] [SIMULATOR] Issued Order ID: ${uniqueIdemOrderId}. Receipt: receipt_${Date.now()}`);
       
-      logAuditEvent({
+      await appendAuditEvent({
         actor: "AI Buyer Agent",
         action: "ORDER_CREATED",
         session_id,
@@ -502,7 +494,7 @@ export async function POST(request: NextRequest) {
           "Mandate Bound": "PASS",
           "Budget Cap Gate": "PASS",
           "Inventory Stock Gate": "PASS",
-          "Quote Scope Match": "PASS"
+          ...(quote_id ? { "Quote Scope Match": "PASS" as const } : {})
         },
         arithmetic: auditArithmetic
       });
@@ -533,14 +525,15 @@ export async function POST(request: NextRequest) {
       notes: {
         agent_checkout: "true",
         protocol: "a2a-v1.0",
-        original_price_paise: pricing.total_paise.toString()
+        original_price_paise: pricing.subtotal_paise.toString(),
+        final_price_paise: actualRzpTotal.toString()
       }
     });
 
-    await saveOrderToDb(supabase, uniqueIdemOrderId, pricing.items, auto_capture ? "paid" : "created", `${adminNotes}|rzp_order_id:${rzpOrder.id}`);
+    await saveOrderToDb(supabase, uniqueIdemOrderId, pricing.evaluated_items, auto_capture ? "paid" : "created", `${adminNotes}|rzp_order_id:${rzpOrder.id}`);
     console.log(`🎉 [PAYMENT] [RAZORPAY] Created Order ID: ${rzpOrder.id}. Receipt: ${rzpOrder.receipt}`);
 
-    logAuditEvent({
+    await appendAuditEvent({
       actor: "AI Buyer Agent",
       action: "ORDER_CREATED",
       session_id,
@@ -559,7 +552,7 @@ export async function POST(request: NextRequest) {
         "Mandate Bound": "PASS",
         "Budget Cap Gate": "PASS",
         "Inventory Stock Gate": "PASS",
-        "Quote Scope Match": "PASS"
+        ...(quote_id ? { "Quote Scope Match": "PASS" as const } : {})
       },
       arithmetic: auditArithmetic
     });
@@ -569,7 +562,7 @@ export async function POST(request: NextRequest) {
       try {
         console.log(`[PAYMENT] [RAZORPAY] Generating payment link for Order ID: ${rzpOrder.id}...`);
         const paymentLink = await rzp.paymentLink.create({
-          amount: pricing.total_paise,
+          amount: actualRzpTotal,
           currency: "INR",
           accept_partial: false,
           description: `Checkout payment for order ${rzpOrder.id}`,
