@@ -2,15 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminSupabase, supabasePublic } from "@/lib/supabase";
 import { logAuditEvent } from "@/lib/audit-ledger";
 import { getMerchantConfig, getActivePolicyVersion } from "@/lib/merchant-config";
+import { evaluateGrowthRules, BuyerContext, EvaluatedItem } from "@/lib/growth-engine";
 import Razorpay from "razorpay";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Calculates correct cart pricing based on DB products and bundle rules
+ * Calculates correct cart pricing based on DB products and growth rules
  */
-async function calculateCartTotal(items: Array<{ id: string; quantity: number }>) {
+async function calculateCartTotal(
+  items: Array<{ id: string; quantity: number }>,
+  buyerContext: BuyerContext = {}
+) {
   const supabase = getAdminSupabase() || supabasePublic;
   if (!supabase) throw new Error("Database client unavailable");
 
@@ -25,53 +29,50 @@ async function calculateCartTotal(items: Array<{ id: string; quantity: number }>
     throw new Error("Failed to retrieve products from database");
   }
 
-  let subtotalPaise = 0;
-
-  const itemDetails = items.map((item) => {
+  const itemDetails: EvaluatedItem[] = items.map((item) => {
     const product = dbProducts.find((p) => p.id === item.id);
     if (!product) throw new Error(`Product ID ${item.id} not found in catalog`);
 
-    const price = product.price;
-    const itemTotal = price * item.quantity;
-    subtotalPaise += itemTotal;
-
     return {
-      product,
+      product: {
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        cost_paise: product.price * 0.4, // estimated cost for margin floor calculation
+        stock: product.stock,
+        category: product.category,
+        sizes: product.sizes,
+        images: product.images
+      },
       quantity: item.quantity,
-      price_paise: price,
+      price_paise: product.price,
     };
   });
 
-  // Dynamically evaluate active bundle rules from merchant config
   const config = getMerchantConfig();
-  let discountPaise = 0;
 
-  if (config.policy.agent_can_recommend_bundles && config.bundle_rules) {
-    const activeRules = config.bundle_rules.filter((b) => b.active);
-    
-    for (const rule of activeRules) {
-      const requiredIds = rule.product_ids || [rule.product_a_id, rule.product_b_id].filter(Boolean) as string[];
-      const allPresent = requiredIds.every((reqId) => productIds.includes(reqId));
-      if (allPresent && requiredIds.length > 0) {
-        const matchingItemsTotal = itemDetails
-          .filter((it) => requiredIds.includes(it.product.id))
-          .reduce((sum, it) => sum + (it.price_paise * it.quantity), 0);
-        
-        const candidateDiscount = Math.round((matchingItemsTotal * rule.discount_percent) / 100);
-        if (candidateDiscount > discountPaise) {
-          discountPaise = candidateDiscount;
-        }
-      }
+  // Evaluate growth rules deterministically
+  const growthResult = evaluateGrowthRules(
+    itemDetails,
+    config.growth_rules || [],
+    buyerContext,
+    {
+      max_discount_percent: config.policy.max_discount_percent ?? 25,
+      margin_floor_percent: config.policy.margin_floor_percent ?? 60,
+      max_autonomous_checkout_paise: config.policy.max_autonomous_checkout_paise,
+      promotion_stacking_allowed: config.policy.promotion_stacking_allowed ?? false
     }
-  }
-
-  const finalTotalPaise = subtotalPaise - discountPaise;
+  );
 
   return {
-    subtotal_paise: subtotalPaise,
-    discount_paise: discountPaise,
-    total_paise: finalTotalPaise,
-    final_total_paise: finalTotalPaise,
+    subtotal_paise: growthResult.subtotal_paise,
+    discount_paise: growthResult.discount_paise,
+    total_paise: growthResult.final_total_paise,
+    final_total_paise: growthResult.final_total_paise,
+    buyer_savings_paise: growthResult.buyer_savings_paise,
+    applied_rules: growthResult.applied_rules,
+    free_items: growthResult.free_items,
+    cross_sell_recommendations: growthResult.cross_sell_recommendations,
     items: itemDetails,
   };
 }
@@ -144,7 +145,8 @@ export async function POST(request: NextRequest) {
       idempotency_key,
       mandate_authorized = false,
       session_id = `sess_${Date.now()}`,
-      cart_id = "default_cart"
+      cart_id = "default_cart",
+      buyer_context = {}
     } = body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -257,11 +259,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 4. Price Integrity Guardrail
+    // 4. Price Integrity Guardrail with Growth Rule Engine
     let pricing;
     try {
-      pricing = await calculateCartTotal(items);
-      console.log(`[GUARDRAIL] [PRICE] calculated total: ₹${(pricing.total_paise / 100).toFixed(2)} (Subtotal: ₹${(pricing.subtotal_paise / 100).toFixed(2)}, Bundle Discount: ₹${(pricing.discount_paise / 100).toFixed(2)})`);
+      pricing = await calculateCartTotal(items, buyer_context);
+      console.log(`[GUARDRAIL] [PRICE] calculated total: ₹${(pricing.total_paise / 100).toFixed(2)} (Subtotal: ₹${(pricing.subtotal_paise / 100).toFixed(2)}, Discount: ₹${(pricing.discount_paise / 100).toFixed(2)}, Applied Rules: ${pricing.applied_rules.map(r => r.rule_name).join(", ") || "None"})`);
     } catch (pricingErr: any) {
       console.error(`[GUARDRAIL] [PRICE] pricing check failed: ${pricingErr?.message}`);
       return NextResponse.json(
@@ -452,12 +454,12 @@ export async function POST(request: NextRequest) {
 
     console.log("✅ [GUARDRAIL] All checkout security rails cleared. Initiating payment creation...");
 
-    // 8. Razorpay Test Rails Checkout & Idempotency persistence (Gate 8)
+    // 8. Razorpay Test Rails Checkout & Idempotency persistence
     const keyId = process.env.RAZORPAY_KEY_ID;
     const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
     const actualRzpTotal = pricing.total_paise;
-    const adminNotes = `idempotency_key:${requestIdempotencyKey || ""}|quote_id:${quote_id || ""}`;
+    const adminNotes = `idempotency_key:${requestIdempotencyKey || ""}|quote_id:${quote_id || ""}|rules:${pricing.applied_rules.map(r => r.rule_id).join(",")}`;
 
     const auditArithmetic = {
       subtotal: Math.round(pricing.subtotal_paise / 100),
@@ -468,7 +470,6 @@ export async function POST(request: NextRequest) {
     };
 
     if (!keyId || !keySecret || keyId === "rzp_test_placeholder") {
-      // Direct insertion will trigger unique constraint violation if duplicate ID is supplied
       await saveOrderToDb(supabase, uniqueIdemOrderId, pricing.items, auto_capture ? "paid" : "created", adminNotes);
       console.log(`🎉 [PAYMENT] [SIMULATOR] Issued Order ID: ${uniqueIdemOrderId}. Receipt: receipt_${Date.now()}`);
       
@@ -485,7 +486,7 @@ export async function POST(request: NextRequest) {
         policy_result: "ALLOWED",
         reason_code: "SUCCESS",
         outcome: "COMPLETED",
-        details: `Autonomous order created successfully under policy ${currentPolicyVersion}. Total: ₹${Math.round(actualRzpTotal / 100)}.`,
+        details: `Autonomous order created successfully under policy ${currentPolicyVersion}. Total: ₹${Math.round(actualRzpTotal / 100)}. Growth Rules: ${pricing.applied_rules.map(r => r.rule_name).join(", ") || "Standard Base"}.`,
         gate_results: {
           "Autonomy Gate": "PASS",
           "Mandate Bound": "PASS",
@@ -503,6 +504,7 @@ export async function POST(request: NextRequest) {
         amount_paise: actualRzpTotal,
         currency: "INR",
         simulated: true,
+        applied_rules: pricing.applied_rules,
         receipt: `receipt_${Date.now()}`,
         payment_link_url: auto_capture ? null : `https://rzp.io/i/simulated_${uniqueIdemOrderId}`,
         details: "Checkout executed via A2A Bounded Payment Simulator.",
@@ -525,7 +527,6 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    // Enforce idempotency uniquely in database logs
     await saveOrderToDb(supabase, uniqueIdemOrderId, pricing.items, auto_capture ? "paid" : "created", `${adminNotes}|rzp_order_id:${rzpOrder.id}`);
     console.log(`🎉 [PAYMENT] [RAZORPAY] Created Order ID: ${rzpOrder.id}. Receipt: ${rzpOrder.receipt}`);
 
@@ -542,7 +543,7 @@ export async function POST(request: NextRequest) {
       policy_result: "ALLOWED",
       reason_code: "SUCCESS",
       outcome: "COMPLETED",
-      details: `Razorpay order ${rzpOrder.id} created under policy ${currentPolicyVersion}. Total: ₹${Math.round(actualRzpTotal / 100)}.`,
+      details: `Razorpay order ${rzpOrder.id} created under policy ${currentPolicyVersion}. Total: ₹${Math.round(actualRzpTotal / 100)}. Growth Rules: ${pricing.applied_rules.map(r => r.rule_name).join(", ") || "Standard Base"}.`,
       gate_results: {
         "Autonomy Gate": "PASS",
         "Mandate Bound": "PASS",
@@ -591,6 +592,7 @@ export async function POST(request: NextRequest) {
       amount_paise: actualRzpTotal,
       currency: "INR",
       simulated: false,
+      applied_rules: pricing.applied_rules,
       receipt: rzpOrder.receipt,
       payment_link_url: paymentLinkUrl,
     });

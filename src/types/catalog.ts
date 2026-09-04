@@ -50,16 +50,28 @@ export interface AgentProductItem {
 
 export interface MerchantCapabilityManifest {
   manifest_type: "protocol-shaped merchant capability manifest";
-  policy_version: "v1.0";
+  policy_version: string;
   agent_permissions: {
+    can_discover_products?: boolean;
     can_recommend_bundles: boolean;
+    can_recommend_growth_rules?: boolean;
     can_negotiate: boolean;
+    can_apply_promotions?: boolean;
+    can_offer_welcome_incentives?: boolean;
+    can_offer_returning_incentives?: boolean;
+    can_initiate_recovery?: boolean;
+    can_suggest_reorders?: boolean;
     can_checkout: boolean;
   };
   mandate_required: boolean;
   max_autonomous_checkout_inr: number;
   max_autonomous_checkout_paise: number;
+  max_discount_percent?: number;
+  margin_floor_percent?: number;
   quote_expiry_seconds: number;
+  promotion_stacking_allowed?: boolean;
+  max_recommendations_per_interaction?: number;
+  recovery_retry_limit?: number;
   active_bundles: {
     id: string;
     name: string;
@@ -69,6 +81,18 @@ export interface MerchantCapabilityManifest {
     product_b_id?: string;
     recommendation_reason?: string;
   }[];
+  active_growth_rules?: Array<{
+    id: string;
+    name: string;
+    type: string;
+    product_ids: string[];
+    discount_percent?: number;
+    discount_amount_paise?: number;
+    buy_quantity?: number;
+    free_quantity?: number;
+    recommendation_reason: string;
+    stackable: boolean;
+  }>;
 }
 
 export interface AgentCatalogResponse {

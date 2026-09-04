@@ -18,6 +18,47 @@ interface AdapterRequest {
   payload?: any;
 }
 
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const protocol = (searchParams.get("protocol") || "acp-shaped") as ProtocolType;
+    const action = (searchParams.get("action") || "catalog") as ActionType;
+
+    const catalogData = await getAgentCatalog();
+    const envelopeMeta = {
+      "acp-shaped": {
+        envelope_spec: "acp-agentic-commerce-draft",
+        compatibility_layer: "protocol-shaped-adapter",
+        capabilities: catalogData.merchant_capability_manifest
+      },
+      "ap2-shaped": {
+        envelope_spec: "ap2-mandate-commerce",
+        mandate_spec: "upi-uap-v1",
+        capabilities: catalogData.merchant_capability_manifest
+      },
+      "x402-shaped": {
+        envelope_spec: "x402-http-payment-required",
+        settlement_rail: "razorpay_a2a_inr",
+        capabilities: catalogData.merchant_capability_manifest
+      }
+    };
+
+    return NextResponse.json({
+      protocol,
+      status: "success",
+      envelope: envelopeMeta[protocol] || envelopeMeta["acp-shaped"],
+      disclaimer: "Protocol-shaped demo envelope. Routes to authoritative ZeroClick catalog engine.",
+      data: catalogData
+    }, { status: 200 });
+  } catch (err: any) {
+    return NextResponse.json({
+      status: "error",
+      error: "ADAPTER_FAILURE",
+      details: err?.message
+    }, { status: 500 });
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body: AdapterRequest = await request.json();

@@ -1,6 +1,6 @@
 import { Product, AgentProductItem, AgentCatalogResponse, CatalogFilterParams, BundleOffer, MerchantCapabilityManifest } from "@/types/catalog";
 import { getAdminSupabase, supabasePublic } from "./supabase";
-import { getMerchantConfig } from "./merchant-config";
+import { getMerchantConfig, getActivePolicyVersion } from "./merchant-config";
 
 /**
  * Extracts all valid images from product.images and product.color_images
@@ -65,6 +65,26 @@ export function transformProductForAgent(product: Product): AgentProductItem {
       description: b.recommendation_reason || `Bundle as part of "${b.name}" for a ${b.discount_percent}% combo discount.`,
       recommended_skus: b.product_ids || [b.product_a_id, b.product_b_id].filter(Boolean) as string[]
     }));
+  }
+
+  // Also include growth rules if applicable
+  if (config.growth_rules) {
+    const activeGrowth = config.growth_rules.filter(
+      r => r.active && (
+        r.product_ids.includes(product.id) ||
+        (r.trigger_product_ids && r.trigger_product_ids.includes(product.id))
+      )
+    );
+    for (const gr of activeGrowth) {
+      if (!bundleOffers.some(bo => bo.addon_category === gr.name)) {
+        bundleOffers.push({
+          addon_category: gr.name,
+          discount_pct: gr.discount_percent || 5,
+          description: gr.recommendation_reason || gr.description,
+          recommended_skus: gr.product_ids
+        });
+      }
+    }
   }
 
   return {
@@ -155,20 +175,33 @@ export async function getAgentCatalog(filters?: CatalogFilterParams): Promise<Ag
   const products = await getStoreProducts(filters);
   const agentProducts = products.map(transformProductForAgent);
   const config = getMerchantConfig();
+  const activeVersion = getActivePolicyVersion();
 
   const manifest: MerchantCapabilityManifest = {
     manifest_type: "protocol-shaped merchant capability manifest",
-    policy_version: "v1.0",
+    policy_version: activeVersion,
     agent_permissions: {
+      can_discover_products: config.policy.can_discover_products ?? true,
       can_recommend_bundles: config.policy.agent_can_recommend_bundles,
+      can_recommend_growth_rules: config.policy.agent_can_recommend_growth_rules ?? true,
       can_negotiate: config.policy.agent_can_negotiate,
+      can_apply_promotions: config.policy.can_apply_promotions ?? true,
+      can_offer_welcome_incentives: config.policy.can_offer_welcome_incentives ?? true,
+      can_offer_returning_incentives: config.policy.can_offer_returning_incentives ?? true,
+      can_initiate_recovery: config.policy.can_initiate_recovery ?? true,
+      can_suggest_reorders: config.policy.can_suggest_reorders ?? true,
       can_checkout: config.policy.agent_can_checkout,
     },
     mandate_required: config.policy.mandate_required,
     max_autonomous_checkout_inr: config.policy.max_autonomous_checkout_paise / 100,
     max_autonomous_checkout_paise: config.policy.max_autonomous_checkout_paise,
+    max_discount_percent: config.policy.max_discount_percent ?? 25,
+    margin_floor_percent: config.policy.margin_floor_percent ?? 60,
     quote_expiry_seconds: config.policy.quote_expiry_seconds,
-    active_bundles: config.bundle_rules.filter(b => b.active).map(b => ({
+    promotion_stacking_allowed: config.policy.promotion_stacking_allowed ?? false,
+    max_recommendations_per_interaction: config.policy.max_recommendations_per_interaction ?? 2,
+    recovery_retry_limit: config.policy.recovery_retry_limit ?? 1,
+    active_bundles: (config.bundle_rules || []).filter(b => b.active).map(b => ({
       id: b.id,
       name: b.name,
       discount_percent: b.discount_percent,
@@ -176,6 +209,18 @@ export async function getAgentCatalog(filters?: CatalogFilterParams): Promise<Ag
       product_a_id: b.product_a_id || (b.product_ids ? b.product_ids[0] : ""),
       product_b_id: b.product_b_id || (b.product_ids ? b.product_ids[1] : ""),
       recommendation_reason: b.recommendation_reason || `Bundle combo for a ${b.discount_percent}% discount.`
+    })),
+    active_growth_rules: (config.growth_rules || []).filter(r => r.active).map(r => ({
+      id: r.id,
+      name: r.name,
+      type: r.type,
+      product_ids: r.product_ids,
+      discount_percent: r.discount_percent,
+      discount_amount_paise: r.discount_amount_paise,
+      buy_quantity: r.buy_quantity,
+      free_quantity: r.free_quantity,
+      recommendation_reason: r.recommendation_reason,
+      stackable: r.stackable
     }))
   };
 

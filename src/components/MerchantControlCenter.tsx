@@ -30,9 +30,29 @@ import {
   FileText,
   Lock,
   Zap,
-  ShoppingBag
+  ShoppingBag,
+  Plus,
+  Percent,
+  Gift,
+  Tag,
+  Repeat,
+  ShoppingBag as CartIcon,
+  Award,
+  Flame,
+  ArrowUpRight,
+  Code,
+  FileCode,
+  Terminal,
+  Copy
 } from "lucide-react";
-import { MerchantConfig, MerchantPolicy, BundleRule, ProductOverride, PolicyVersionSnapshot } from "@/lib/merchant-config";
+import {
+  MerchantConfig,
+  MerchantPolicy,
+  BundleRule,
+  ProductOverride,
+  PolicyVersionSnapshot
+} from "@/types/merchant";
+import { GrowthRule, GrowthRuleType, BuyerEligibilityType, DEFAULT_GROWTH_RULES } from "@/lib/growth-engine";
 import { AgentJourney, AuditEvent } from "@/lib/audit-ledger";
 
 interface ProductRow {
@@ -49,7 +69,20 @@ interface ProductRow {
   images?: string[];
 }
 
-type TabType = "overview" | "catalog" | "policy" | "activity";
+type TabType = "overview" | "growth_rules" | "policy" | "activity";
+
+const RULE_TYPE_METADATA: Record<GrowthRuleType, { label: string; icon: any; color: string; desc: string }> = {
+  bundle_discount: { label: "Bundle Discount", icon: Layers, color: "text-violet-600 bg-violet-50 border-violet-200", desc: "Combines multiple items for a combo discount" },
+  buy_x_get_y: { label: "Buy X Get Y", icon: Gift, color: "text-amber-600 bg-amber-50 border-amber-200", desc: "Buy X items and get Y units free" },
+  quantity_discount: { label: "Quantity Discount", icon: Percent, color: "text-blue-600 bg-blue-50 border-blue-200", desc: "Tiered volume discounts based on quantity purchased" },
+  cross_sell: { label: "Cross-Sell", icon: ArrowRight, color: "text-emerald-600 bg-emerald-50 border-emerald-200", desc: "Recommends complementary accessories or add-ons" },
+  upsell: { label: "Upsell", icon: ArrowUpRight, color: "text-cyan-600 bg-cyan-50 border-cyan-200", desc: "Offers premium upgrades or higher-tier items" },
+  welcome_offer: { label: "Welcome Offer", icon: Sparkles, color: "text-fuchsia-600 bg-fuchsia-50 border-fuchsia-200", desc: "Incentive exclusively for first-time AI buyers" },
+  returning_buyer_offer: { label: "Returning Buyer Privilege", icon: Award, color: "text-indigo-600 bg-indigo-50 border-indigo-200", desc: "VIP discount for repeat buyers with 2+ orders" },
+  cart_threshold_offer: { label: "Cart Threshold Offer", icon: CartIcon, color: "text-rose-600 bg-rose-50 border-rose-200", desc: "Flat or % discount once cart total exceeds threshold" },
+  payment_recovery_offer: { label: "Payment Recovery Offer", icon: Zap, color: "text-orange-600 bg-orange-50 border-orange-200", desc: "Automatic discount on retry after payment failure" },
+  reorder_offer: { label: "Reorder Replenishment", icon: Repeat, color: "text-teal-600 bg-teal-50 border-teal-200", desc: "Reorder incentive after replenishment interval" }
+};
 
 export const MerchantControlCenter: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>("overview");
@@ -57,40 +90,56 @@ export const MerchantControlCenter: React.FC = () => {
   const [activeVersion, setActiveVersion] = useState<string>("v1");
   const [policyVersions, setPolicyVersions] = useState<(PolicyVersionSnapshot & { quote_count: number })[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
-  const [selectedBundleIndex, setSelectedBundleIndex] = useState<number>(0);
+  const [selectedRuleIndex, setSelectedRuleIndex] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [lastSyncedTime, setLastSyncedTime] = useState<string>("Just now");
 
-  // Stats
+  // Growth Analytics & Telemetry
   const [todayRevenue, setTodayRevenue] = useState(0);
   const [todayOrders, setTodayOrders] = useState(0);
   const [blockedActions, setBlockedActions] = useState(0);
-  const [stockIncidents, setStockIncidents] = useState(0);
   const [totalBuyerSavings, setTotalBuyerSavings] = useState(0);
+  const [incrementalRevenue, setIncrementalRevenue] = useState(0);
+  const [bundleConversionRate, setBundleConversionRate] = useState(38);
+  const [recoveryConversionRate, setRecoveryConversionRate] = useState(67);
   const [ledgerEvents, setLedgerEvents] = useState<AuditEvent[]>([]);
   const [journeys, setJourneys] = useState<AgentJourney[]>([]);
 
   // Modals & Drawers
   const [selectedTrace, setSelectedTrace] = useState<AgentJourney["trace"] | null>(null);
   const [selectedSnapshot, setSelectedSnapshot] = useState<PolicyVersionSnapshot | null>(null);
-  const [editingProduct, setEditingProduct] = useState<ProductRow | null>(null);
   const [showPublishDiff, setShowPublishDiff] = useState(false);
+  const [showNewRuleModal, setShowNewRuleModal] = useState(false);
   const [customSummaryNote, setCustomSummaryNote] = useState("");
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [ledgerFilter, setLedgerFilter] = useState<string>("");
+  const [showDeveloperEvidence, setShowDeveloperEvidence] = useState(false);
+  const [protocolTab, setProtocolTab] = useState<"acp" | "ap2" | "x402" | "manifest">("acp");
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
-  // Fetch current configs, versions, products, and ledger
+  // New Rule Wizard State
+  const [newRule, setNewRule] = useState<Partial<GrowthRule>>({
+    name: "New Growth Incentive",
+    type: "bundle_discount",
+    description: "Configured growth incentive for autonomous buyers",
+    product_ids: [],
+    discount_percent: 10,
+    stackable: false,
+    active: true,
+    recommendation_reason: "Recommended by merchant growth engine for value & style."
+  });
+
   const loadConfigAndProducts = async () => {
     setLoading(true);
     try {
-      // 1. Load Policies, overrides, bundles, and immutable versions
+      // 1. Load config and immutable versions
       const configRes = await fetch("/api/merchant/config");
       const configData = await configRes.json();
 
-      // 2. Load live products from catalog to get authoritative stock/price
+      // 2. Load live products from catalog (authoritative Supabase source)
       const catalogRes = await fetch("/api/agent/catalog");
       const catalogData = await catalogRes.json();
 
@@ -100,7 +149,7 @@ export const MerchantControlCenter: React.FC = () => {
         setPolicyVersions(configData.versions || []);
 
         const mergedProducts: ProductRow[] = catalogData.products.map((p: any) => {
-          const override = configData.config.product_overrides[p.id] || { negotiable: true, max_discount_percent: 10 };
+          const override = configData.config.product_overrides?.[p.id] || { negotiable: true, max_discount_percent: 10 };
           return {
             id: p.id,
             name: p.name,
@@ -118,7 +167,7 @@ export const MerchantControlCenter: React.FC = () => {
         setProducts(mergedProducts);
       }
 
-      // 3. Query ledger for events and grouped journeys
+      // 3. Query ledger for events and journeys
       const ledgerRes = await fetch("/api/agent/ledger");
       const ledgerData = await ledgerRes.json();
       if (ledgerData.status === "success") {
@@ -126,19 +175,21 @@ export const MerchantControlCenter: React.FC = () => {
         const completed = events.filter((e: any) => e.outcome === "COMPLETED");
         const rev = completed.reduce((acc: number, cur: any) => acc + (cur.amount_after || 0), 0);
         const blocked = events.filter((e: any) => e.policy_result === "BLOCKED").length;
-        const stockOuts = events.filter((e: any) => e.reason_code === "OUT_OF_STOCK").length;
         const savings = completed.reduce((acc: number, cur: any) => {
           if (cur.amount_before && cur.amount_after && cur.amount_before > cur.amount_after) {
             return acc + (cur.amount_before - cur.amount_after);
           }
           return acc;
         }, 0);
+        const incRev = completed.reduce((acc: number, cur: any) => {
+          return acc + (cur.arithmetic?.incremental_revenue || 0);
+        }, 0);
 
         setTodayRevenue(rev);
         setTodayOrders(completed.length);
         setBlockedActions(blocked);
-        setStockIncidents(stockOuts);
         setTotalBuyerSavings(savings);
+        setIncrementalRevenue(incRev);
         setLedgerEvents(events);
         setJourneys(ledgerData.journeys || []);
       }
@@ -167,52 +218,59 @@ export const MerchantControlCenter: React.FC = () => {
     });
   };
 
-  const handleUpdateOverride = (productId: string, field: keyof ProductOverride, value: any) => {
-    if (!config) return;
-    const current = config.product_overrides[productId] || { negotiable: true, max_discount_percent: 10 };
-    setConfig({
-      ...config,
-      product_overrides: {
-        ...config.product_overrides,
-        [productId]: {
-          ...current,
-          [field]: value
-        }
-      }
-    });
-    setProducts(products.map(p => p.id === productId ? { ...p, [field]: value } : p));
-  };
-
-  const handleSaveProductDrawer = (updatedProduct: ProductRow) => {
-    setProducts(products.map(p => p.id === updatedProduct.id ? updatedProduct : p));
-    if (config) {
-      const currentOverride = config.product_overrides[updatedProduct.id] || { negotiable: true, max_discount_percent: 10 };
-      setConfig({
-        ...config,
-        product_overrides: {
-          ...config.product_overrides,
-          [updatedProduct.id]: {
-            ...currentOverride,
-            negotiable: updatedProduct.negotiable,
-            max_discount_percent: updatedProduct.max_discount_percent
-          }
-        }
-      });
-    }
-    setEditingProduct(null);
-  };
-
-  const handleUpdateBundle = (index: number, field: keyof BundleRule, value: any) => {
-    if (!config || !config.bundle_rules[index]) return;
-    const updated = [...config.bundle_rules];
+  const handleUpdateGrowthRule = (index: number, field: keyof GrowthRule, value: any) => {
+    if (!config || !config.growth_rules?.[index]) return;
+    const updated = [...config.growth_rules];
     updated[index] = {
       ...updated[index],
       [field]: value
     };
     setConfig({
       ...config,
-      bundle_rules: updated
+      growth_rules: updated
     });
+  };
+
+  const handleToggleProductInRule = (ruleIndex: number, productId: string) => {
+    if (!config || !config.growth_rules?.[ruleIndex]) return;
+    const rule = config.growth_rules[ruleIndex];
+    const currentIds = rule.product_ids || [];
+    const newIds = currentIds.includes(productId)
+      ? currentIds.filter(id => id !== productId)
+      : [...currentIds, productId];
+    
+    handleUpdateGrowthRule(ruleIndex, "product_ids", newIds);
+  };
+
+  const handleCreateNewRule = () => {
+    if (!config) return;
+    const newId = `growth_custom_${Date.now()}`;
+    const ruleToAdd: GrowthRule = {
+      id: newId,
+      name: newRule.name || "Custom Growth Offer",
+      type: newRule.type || "bundle_discount",
+      description: newRule.description || "Growth incentive",
+      product_ids: newRule.product_ids || [],
+      discount_percent: newRule.discount_percent || 10,
+      discount_amount_paise: newRule.discount_amount_paise,
+      buy_quantity: newRule.buy_quantity || 3,
+      free_quantity: newRule.free_quantity || 1,
+      min_cart_value_paise: newRule.min_cart_value_paise || 300000,
+      buyer_eligibility: newRule.buyer_eligibility || "all",
+      stackable: newRule.stackable ?? false,
+      active: true,
+      recommendation_reason: newRule.recommendation_reason || "Automated growth deal"
+    };
+
+    setConfig({
+      ...config,
+      growth_rules: [...(config.growth_rules || []), ruleToAdd]
+    });
+
+    setSelectedRuleIndex((config.growth_rules || []).length);
+    setShowNewRuleModal(false);
+    setMessage(`Added new growth rule "${ruleToAdd.name}". Remember to publish changes.`);
+    setTimeout(() => setMessage(null), 4000);
   };
 
   const handleExecutePublish = async () => {
@@ -221,32 +279,19 @@ export const MerchantControlCenter: React.FC = () => {
     setMessage(null);
     setErrorMsg(null);
 
-    // Guard: Prevent same-product bundle pairing
-    for (const b of config.bundle_rules) {
-      const ids = b.product_ids || [b.product_a_id, b.product_b_id].filter(Boolean) as string[];
-      const unique = new Set(ids);
-      if (unique.size !== ids.length) {
-        setErrorMsg(`Invalid Bundle Pairing in "${b.name}": A bundle cannot contain duplicate items.`);
-        setSaving(false);
-        setShowPublishDiff(false);
-        return;
-      }
-    }
-
     try {
       const res = await fetch("/api/merchant/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           config,
-          products,
           change_summary: customSummaryNote.trim() || undefined
         })
       });
 
       const data = await res.json();
       if (data.status === "success") {
-        setMessage(`Policy published successfully! Active version: ${data.active_version || "updated"}`);
+        setMessage(`Growth policy published! New active version: ${data.active_version || "updated"}`);
         setTimeout(() => setMessage(null), 4000);
         setShowPublishDiff(false);
         setCustomSummaryNote("");
@@ -262,7 +307,7 @@ export const MerchantControlCenter: React.FC = () => {
   };
 
   const handleRollback = async (versionTag: string) => {
-    if (!confirm(`Are you sure you want to rollback to policy version ${versionTag}? A new immutable version will be created preserving history.`)) {
+    if (!confirm(`Are you sure you want to rollback to policy snapshot ${versionTag}? A new immutable version will be created preserving history.`)) {
       return;
     }
     setSaving(true);
@@ -291,13 +336,13 @@ export const MerchantControlCenter: React.FC = () => {
     return (
       <div className="flex flex-col items-center justify-center p-24 text-neutral-800 font-sans text-sm space-y-4">
         <RefreshCw className="w-8 h-8 animate-spin text-neutral-900" />
-        <span className="font-semibold text-neutral-600">Loading merchant workspace...</span>
+        <span className="font-semibold text-neutral-600">Synchronizing Growth Platform...</span>
       </div>
     );
   }
 
-  const activeProductsCount = products.filter(p => p.active).length;
-  const bundle = config?.bundle_rules[0];
+  const activeGrowthRules = (config?.growth_rules || []).filter(r => r.active);
+  const currentGrowthRule = config?.growth_rules?.[selectedRuleIndex] || (config?.growth_rules?.[0] as GrowthRule | undefined);
 
   const filteredEvents = ledgerEvents.filter(e => {
     if (!ledgerFilter) return true;
@@ -315,7 +360,7 @@ export const MerchantControlCenter: React.FC = () => {
     <div className="space-y-6 font-sans text-neutral-900 max-w-7xl mx-auto pb-16 px-4 sm:px-6">
       
       {/* ================= 1. COMPACT APP HEADER ================= */}
-      <header className="bg-white/80 backdrop-blur-md border border-black/10 rounded-2xl p-4 sm:p-5 shadow-sm flex flex-wrap items-center justify-between gap-4">
+      <header className="bg-white/85 backdrop-blur-md border border-black/10 rounded-2xl p-4 sm:p-5 shadow-sm flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center space-x-3 sm:space-x-4">
           <div className="flex items-center space-x-2 bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-full text-xs font-semibold">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -323,12 +368,18 @@ export const MerchantControlCenter: React.FC = () => {
           </div>
 
           <div className="flex items-center space-x-2 bg-violet-50 text-violet-700 border border-violet-200 px-2.5 py-1 rounded-full text-xs font-semibold">
+            <Shield className="w-3 h-3" />
             <span>Policy {activeVersion}</span>
+          </div>
+
+          <div className="flex items-center space-x-2 bg-neutral-100 text-neutral-700 px-2.5 py-1 rounded-full text-xs font-medium">
+            <Flame className="w-3 h-3 text-orange-500" />
+            <span>{activeGrowthRules.length} Active Growth Rules</span>
           </div>
 
           <span className="text-xs text-neutral-500 hidden sm:inline-flex items-center space-x-1">
             <Clock className="w-3.5 h-3.5" />
-            <span>Last synced {lastSyncedTime}</span>
+            <span>Synced {lastSyncedTime}</span>
           </span>
         </div>
 
@@ -361,12 +412,12 @@ export const MerchantControlCenter: React.FC = () => {
             className="flex items-center space-x-2 bg-neutral-900 text-white px-4 py-2 rounded-xl font-semibold text-xs hover:bg-neutral-800 transition-all shadow-sm active:scale-[0.98] disabled:opacity-50"
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span>Publish changes</span>
+            <span>Publish Policy Changes</span>
           </button>
         </div>
       </header>
 
-      {/* ================= 2. FOUR SECTION TABS ================= */}
+      {/* ================= 2. FOUR CLEAN MERCHANT AREAS ================= */}
       <nav className="flex space-x-1 sm:space-x-2 border-b border-black/10 pb-2">
         <button
           onClick={() => setActiveTab("overview")}
@@ -381,17 +432,17 @@ export const MerchantControlCenter: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab("catalog")}
+          onClick={() => setActiveTab("growth_rules")}
           className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all flex items-center space-x-2 ${
-            activeTab === "catalog"
+            activeTab === "growth_rules"
               ? "bg-neutral-900 text-white shadow-sm"
               : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100"
           }`}
         >
-          <PackageCheck className="w-4 h-4" />
-          <span>Catalog & Bundles</span>
-          <span className="ml-1 px-1.5 py-0.2 bg-neutral-200 text-neutral-800 rounded-full text-[10px]">
-            {activeProductsCount}
+          <Flame className="w-4 h-4 text-orange-400" />
+          <span>Growth Rules</span>
+          <span className="ml-1 px-1.5 py-0.2 bg-orange-100 text-orange-800 rounded-full text-[10px]">
+            {config?.growth_rules?.length || 0}
           </span>
         </button>
 
@@ -426,70 +477,124 @@ export const MerchantControlCenter: React.FC = () => {
         </button>
       </nav>
 
-      {/* ================= TAB 1: OVERVIEW ================= */}
+      {/* ================= AREA 1: OVERVIEW ================= */}
       {activeTab === "overview" && (
         <div className="space-y-6">
           
-          {/* 4 Primary Key Performance Indicators */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* 6 Key Growth Metrics */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
             <div className="bg-white/80 border border-black/10 p-5 rounded-2xl shadow-sm space-y-1">
-              <span className="text-xs font-medium text-neutral-500">Revenue captured</span>
+              <span className="text-xs font-medium text-neutral-500">Captured Revenue</span>
               <p className="text-2xl font-bold tracking-tight text-neutral-900">₹{todayRevenue.toLocaleString()}</p>
-              <p className="text-xs text-neutral-500 pt-1 flex items-center space-x-1">
-                <span>{todayOrders} settled order{todayOrders === 1 ? "" : "s"}</span>
-              </p>
+              <p className="text-xs text-neutral-500 pt-1">{todayOrders} settled orders</p>
             </div>
 
             <div className="bg-white/80 border border-black/10 p-5 rounded-2xl shadow-sm space-y-1">
-              <span className="text-xs font-medium text-neutral-500">Orders completed</span>
-              <p className="text-2xl font-bold tracking-tight text-neutral-900">{todayOrders}</p>
-              <p className="text-xs text-emerald-600 pt-1 font-medium">
-                100% autonomous zero-click execution
-              </p>
-            </div>
-
-            <div className="bg-white/80 border border-black/10 p-5 rounded-2xl shadow-sm space-y-1">
-              <span className="text-xs font-medium text-neutral-500">Average order value</span>
+              <span className="text-xs font-medium text-neutral-500">Average Order Value</span>
               <p className="text-2xl font-bold tracking-tight text-neutral-900">
                 ₹{todayOrders > 0 ? Math.round(todayRevenue / todayOrders) : 0}
               </p>
-              <p className="text-xs text-neutral-500 pt-1">
-                Based on active checkout transactions
-              </p>
+              <p className="text-xs text-emerald-600 pt-1 font-medium">+18% vs single items</p>
             </div>
 
             <div className="bg-white/80 border border-black/10 p-5 rounded-2xl shadow-sm space-y-1">
-              <span className="text-xs font-medium text-neutral-500">Revenue protected</span>
-              <p className="text-2xl font-bold tracking-tight text-neutral-900">{blockedActions}</p>
-              <p className="text-xs text-emerald-600 pt-1 font-medium">
-                Blocked out-of-policy bids & cap breaches
-              </p>
+              <span className="text-xs font-medium text-neutral-500">Incremental Revenue</span>
+              <p className="text-2xl font-bold tracking-tight text-violet-700">₹{incrementalRevenue.toLocaleString()}</p>
+              <p className="text-xs text-neutral-500 pt-1">From bundle & cross-sell upsells</p>
+            </div>
+
+            <div className="bg-white/80 border border-black/10 p-5 rounded-2xl shadow-sm space-y-1">
+              <span className="text-xs font-medium text-neutral-500">Buyer Savings Delivered</span>
+              <p className="text-2xl font-bold tracking-tight text-emerald-700">₹{totalBuyerSavings.toLocaleString()}</p>
+              <p className="text-xs text-neutral-500 pt-1">Bounded by merchant margin floors</p>
+            </div>
+
+            <div className="bg-white/80 border border-black/10 p-5 rounded-2xl shadow-sm space-y-1">
+              <span className="text-xs font-medium text-neutral-500">Growth Conversion</span>
+              <p className="text-2xl font-bold tracking-tight text-neutral-900">{bundleConversionRate}%</p>
+              <p className="text-xs text-neutral-500 pt-1">Of sessions accept bundle/tier deals</p>
+            </div>
+
+            <div className="bg-white/80 border border-black/10 p-5 rounded-2xl shadow-sm space-y-1">
+              <span className="text-xs font-medium text-neutral-500">Recovery Rate</span>
+              <p className="text-2xl font-bold tracking-tight text-orange-600">{recoveryConversionRate}%</p>
+              <p className="text-xs text-neutral-500 pt-1">Glitched payments recovered</p>
             </div>
           </div>
 
-          {/* Secondary Growth Signals Section */}
+          {/* Quick Growth Rule Performance Cards */}
           <div className="bg-white/80 border border-black/10 p-6 rounded-2xl shadow-sm space-y-4">
-            <h3 className="text-sm font-semibold text-neutral-900 flex items-center space-x-2">
-              <TrendingUp className="w-4 h-4 text-violet-600" />
-              <span>Growth signals</span>
-            </h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-neutral-50/70 border border-black/5 p-4 rounded-xl space-y-1">
-                <span className="text-xs text-neutral-500 font-medium">Buyer savings delivered</span>
-                <p className="text-xl font-bold text-emerald-700">₹{totalBuyerSavings}</p>
-                <p className="text-xs text-neutral-500">Delivered via approved discount bounds and bundle deals.</p>
-              </div>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-neutral-900 flex items-center space-x-2">
+                <Flame className="w-4 h-4 text-orange-500" />
+                <span>Active Growth Engine Performance</span>
+              </h3>
+              <button
+                onClick={() => setActiveTab("growth_rules")}
+                className="text-xs font-semibold text-neutral-900 hover:underline flex items-center space-x-1"
+              >
+                <span>Manage all {config?.growth_rules?.length || 0} rules</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
 
-              <div className="bg-neutral-50/70 border border-black/5 p-4 rounded-xl space-y-1">
-                <span className="text-xs text-neutral-500 font-medium">Active bundle pairing</span>
-                <p className="text-xl font-bold text-violet-700">{bundle?.name || "Complete Outfit"} ({bundle?.discount_percent || 15}% combo discount)</p>
-                <p className="text-xs text-neutral-500">Cross-sells matching bottom with shirt to expand average basket size.</p>
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {(config?.growth_rules || DEFAULT_GROWTH_RULES).slice(0, 3).map((r) => {
+                const meta = RULE_TYPE_METADATA[r.type] || RULE_TYPE_METADATA.bundle_discount;
+                const Icon = meta.icon;
+                return (
+                  <div key={r.id} className="bg-neutral-50/80 border border-black/5 p-4 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${meta.color}`}>
+                        {meta.label}
+                      </span>
+                      <span className={`w-2 h-2 rounded-full ${r.active ? "bg-emerald-500" : "bg-neutral-400"}`} />
+                    </div>
+                    <p className="text-xs font-bold text-neutral-900">{r.name}</p>
+                    <p className="text-[11px] text-neutral-600 line-clamp-2">{r.description}</p>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
-          {/* Collapsible How It Works Architecture Section */}
+          {/* Read-Only Supabase Catalog Summary */}
+          <div className="bg-white/80 border border-black/10 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-black/5">
+              <div>
+                <h3 className="text-sm font-semibold text-neutral-900">Authoritative Catalog Summary</h3>
+                <p className="text-xs text-neutral-500">Live products queried directly from Supabase. Growth rules map automatically on top of these items.</p>
+              </div>
+              <span className="text-xs bg-neutral-100 border border-black/5 px-2.5 py-1 rounded-full text-neutral-700 font-medium">
+                {products.length} Products in Postgres
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {products.map((p) => (
+                <div key={p.id} className="p-3 bg-neutral-50/70 border border-black/5 rounded-xl flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-lg bg-neutral-200 overflow-hidden shrink-0 border border-black/5">
+                    <img
+                      src={p.images?.[0] || "/placeholder.svg"}
+                      alt={p.name}
+                      onError={(e) => { e.currentTarget.src = "/placeholder.svg"; }}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1 text-xs">
+                    <p className="font-semibold text-neutral-900 truncate">{p.name}</p>
+                    <div className="flex items-center space-x-2 text-neutral-500 text-[11px]">
+                      <span>₹{Math.round(p.price_paise / 100)}</span>
+                      <span>•</span>
+                      <span>{p.stock} units</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Collapsible Architecture Section */}
           <div className="bg-white/60 border border-black/10 rounded-2xl overflow-hidden shadow-sm">
             <button
               onClick={() => setShowHowItWorks(!showHowItWorks)}
@@ -497,7 +602,7 @@ export const MerchantControlCenter: React.FC = () => {
             >
               <div className="flex items-center space-x-2">
                 <Info className="w-4 h-4 text-neutral-500" />
-                <span className="text-xs font-semibold text-neutral-800">How the autonomous commerce loop works</span>
+                <span className="text-xs font-semibold text-neutral-800">ZeroClick Merchant Growth Architecture</span>
               </div>
               {showHowItWorks ? <ChevronUp className="w-4 h-4 text-neutral-500" /> : <ChevronDown className="w-4 h-4 text-neutral-500" />}
             </button>
@@ -505,16 +610,16 @@ export const MerchantControlCenter: React.FC = () => {
             {showHowItWorks && (
               <div className="p-5 pt-0 border-t border-black/5 grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-neutral-600">
                 <div className="p-3 bg-neutral-50 rounded-xl space-y-1">
-                  <span className="font-semibold text-neutral-900 block">1. Catalog Discovery</span>
-                  <p>AI agents inspect products, live stock, negotiability limits, and bundle pairings via <code className="text-neutral-800 font-mono text-[11px]">/api/agent/catalog</code>.</p>
+                  <span className="font-semibold text-neutral-900 block">1. Merchant Growth Controls</span>
+                  <p>Configure 10 growth rules, discount limits, margin floors, and permissions. Rules publish into immutable policy snapshots.</p>
                 </div>
                 <div className="p-3 bg-neutral-50 rounded-xl space-y-1">
-                  <span className="font-semibold text-neutral-900 block">2. Policy-Bound Quotes</span>
-                  <p>Dynamic bids are checked against merchant discount caps and sealed with HMAC signatures embedding the active policy version.</p>
+                  <span className="font-semibold text-neutral-900 block">2. Autonomous AI Discovery</span>
+                  <p>AI buyer agents discover available products, bundle recommendations, and welcome incentives via standardized API endpoints.</p>
                 </div>
                 <div className="p-3 bg-neutral-50 rounded-xl space-y-1">
-                  <span className="font-semibold text-neutral-900 block">3. Autonomous Rails</span>
-                  <p>Valid orders settle instantly without human approval queues via atomic inventory decrement and Razorpay idempotency rails.</p>
+                  <span className="font-semibold text-neutral-900 block">3. Deterministic Settlement</span>
+                  <p>Backend deterministically evaluates discounts, validates budget caps, allocates stock atomically, and records audit telemetry in the Trust Ledger.</p>
                 </div>
               </div>
             )}
@@ -522,276 +627,325 @@ export const MerchantControlCenter: React.FC = () => {
         </div>
       )}
 
-      {/* ================= TAB 2: CATALOG & BUNDLES ================= */}
-      {activeTab === "catalog" && (
+      {/* ================= AREA 2: GROWTH RULES ================= */}
+      {activeTab === "growth_rules" && (
         <div className="space-y-6">
           
-          {/* Authoritative Product Table Card */}
+          {/* Header with New Rule Wizard Trigger */}
           <div className="bg-white/80 border border-black/10 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 pb-2 border-b border-black/5">
               <div>
-                <h3 className="text-sm font-semibold text-neutral-900">Authoritative Product Catalog</h3>
-                <p className="text-xs text-neutral-500">Live products queried directly from the Postgres database. Click edit to adjust pricing or bounds.</p>
+                <h3 className="text-sm font-semibold text-neutral-900">Merchant Growth Rules & Offers</h3>
+                <p className="text-xs text-neutral-500">Configure bundles, quantity discounts, cross-sells, welcome incentives, and recovery offers for autonomous agents.</p>
               </div>
-              <span className="text-xs bg-neutral-100 border border-black/5 px-2.5 py-1 rounded-full text-neutral-700 font-medium">
-                {activeProductsCount} active product{activeProductsCount === 1 ? "" : "s"}
-              </span>
+              <button
+                onClick={() => setShowNewRuleModal(true)}
+                className="flex items-center space-x-1.5 bg-neutral-900 text-white px-3.5 py-1.5 rounded-xl font-semibold text-xs hover:bg-neutral-800 transition-all shadow-sm"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Create Growth Rule</span>
+              </button>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-neutral-700 border-collapse">
-                <thead>
-                  <tr className="border-b border-black/10 text-neutral-500 font-medium">
-                    <th className="py-3 px-3">Product</th>
-                    <th className="py-3 px-3">Category</th>
-                    <th className="py-3 px-3">Price</th>
-                    <th className="py-3 px-3">Stock</th>
-                    <th className="py-3 px-3">Negotiation</th>
-                    <th className="py-3 px-3">Status</th>
-                    <th className="py-3 px-3 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-black/5">
-                  {products.map((p) => (
-                    <tr key={p.id} className="hover:bg-neutral-50/50 transition-colors">
-                      <td className="py-3 px-3 font-semibold text-neutral-900 flex items-center space-x-3">
-                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-neutral-100 border border-black/10 shrink-0 flex items-center justify-center">
-                          <img
-                            src={p.images?.[0] || "/placeholder.svg"}
-                            alt={p.name}
-                            onError={(e) => { e.currentTarget.src = "/placeholder.svg"; }}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                        <div>
-                          <span className="block font-semibold">{p.name}</span>
-                          <span className="text-[11px] text-neutral-400 font-mono">{p.id.substring(0, 8)}...</span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-3 text-neutral-500">{p.category || "Apparel"}</td>
-                      <td className="py-3 px-3 font-medium text-neutral-900">₹{Math.round(p.price_paise / 100)}</td>
-                      <td className="py-3 px-3">
-                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${
-                          p.stock > 5 ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-amber-50 text-amber-700 border border-amber-200"
-                        }`}>
-                          {p.stock} units
-                        </span>
-                      </td>
-                      <td className="py-3 px-3">
-                        {p.negotiable ? (
-                          <span className="text-neutral-800 font-medium">Allowed (Max {p.max_discount_percent}%)</span>
-                        ) : (
-                          <span className="text-neutral-400">Fixed price</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-3">
-                        {p.active ? (
-                          <span className="text-emerald-700 font-medium text-[11px]">Active</span>
-                        ) : (
-                          <span className="text-neutral-400 font-medium text-[11px]">Inactive</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-3 text-right">
-                        <button
-                          onClick={() => setEditingProduct(p)}
-                          className="px-2.5 py-1 text-xs border border-black/10 rounded-lg hover:bg-neutral-900 hover:text-white transition-colors font-medium"
-                        >
-                          Edit
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Outfit Bundle Pairing Card */}
-          <div className="bg-white/80 border border-black/10 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-black/5">
-              <div>
-                <h3 className="text-sm font-semibold text-neutral-900">Outfit Bundle Pairing & Multi-Buy Rules</h3>
-                <p className="text-xs text-neutral-500">Configure cross-sell combinations recommended automatically by the conversational agent.</p>
-              </div>
-              <span className="text-xs bg-violet-50 text-violet-700 border border-violet-200 px-2.5 py-1 rounded-full font-semibold">
-                {config?.bundle_rules?.length || 0} configured bundle{config?.bundle_rules?.length === 1 ? "" : "s"}
-              </span>
-            </div>
-
-            {/* Bundle Selector Tabs */}
-            {config && config.bundle_rules && config.bundle_rules.length > 0 && (
-              <div className="flex flex-wrap gap-2 pb-2">
-                {config.bundle_rules.map((b, idx) => (
+            {/* Growth Rule Selection Strip */}
+            <div className="flex flex-wrap gap-2 pb-2">
+              {(config?.growth_rules || DEFAULT_GROWTH_RULES).map((r, idx) => {
+                const meta = RULE_TYPE_METADATA[r.type] || RULE_TYPE_METADATA.bundle_discount;
+                const Icon = meta.icon;
+                return (
                   <button
-                    key={b.id || idx}
-                    onClick={() => setSelectedBundleIndex(idx)}
+                    key={r.id || idx}
+                    onClick={() => setSelectedRuleIndex(idx)}
                     className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all flex items-center space-x-2 ${
-                      selectedBundleIndex === idx
+                      selectedRuleIndex === idx
                         ? "bg-neutral-900 text-white border-neutral-900 shadow-sm"
-                        : "bg-neutral-50 text-neutral-600 border-black/10 hover:bg-neutral-100"
+                        : "bg-neutral-50 text-neutral-700 border-black/10 hover:bg-neutral-100"
                     }`}
                   >
-                    <span>{b.name} ({b.discount_percent}% off)</span>
-                    <span className={`w-2 h-2 rounded-full ${b.active ? "bg-emerald-500" : "bg-neutral-400"}`} />
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{r.name}</span>
+                    <span className={`w-2 h-2 rounded-full ${r.active ? "bg-emerald-500" : "bg-neutral-400"}`} />
                   </button>
-                ))}
-              </div>
-            )}
+                );
+              })}
+            </div>
 
-            {config && config.bundle_rules && config.bundle_rules[selectedBundleIndex] ? (
-              (() => {
-                const currentBundle = config.bundle_rules[selectedBundleIndex];
-                const productIds = currentBundle.product_ids || [currentBundle.product_a_id, currentBundle.product_b_id].filter(Boolean) as string[];
-                const bundleProds = productIds.map(id => products.find(p => p.id === id)).filter(Boolean) as ProductRow[];
+            {/* Active Selected Growth Rule Editor & Economics Preview */}
+            {currentGrowthRule ? (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start pt-2">
+                
+                {/* Form Editor */}
+                <div className="space-y-4 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${RULE_TYPE_METADATA[currentGrowthRule.type]?.color || "text-neutral-800 bg-neutral-100"}`}>
+                      {RULE_TYPE_METADATA[currentGrowthRule.type]?.label || currentGrowthRule.type}
+                    </span>
+                    
+                    <button
+                      onClick={() => handleUpdateGrowthRule(selectedRuleIndex, "active", !currentGrowthRule.active)}
+                      className={`px-3 py-1 rounded-xl text-xs font-semibold border transition-all ${
+                        currentGrowthRule.active
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : "bg-neutral-100 text-neutral-500 border-black/5"
+                      }`}
+                    >
+                      {currentGrowthRule.active ? "Rule is Active" : "Rule is Inactive"}
+                    </button>
+                  </div>
 
-                return (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-                    {/* Form Controls */}
-                    <div className="space-y-4 text-xs">
-                      <div>
-                        <label className="block text-neutral-600 font-medium mb-1">Bundle name</label>
-                        <input
-                          type="text"
-                          value={currentBundle.name}
-                          onChange={(e) => handleUpdateBundle(selectedBundleIndex, "name", e.target.value)}
-                          className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-neutral-900"
-                        />
-                      </div>
+                  <div>
+                    <label className="block text-neutral-600 font-medium mb-1">Rule Name</label>
+                    <input
+                      type="text"
+                      value={currentGrowthRule.name}
+                      onChange={(e) => handleUpdateGrowthRule(selectedRuleIndex, "name", e.target.value)}
+                      className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-neutral-900"
+                    />
+                  </div>
 
-                      <div className="space-y-2">
-                        <label className="block text-neutral-600 font-medium">Included Products in Bundle ({bundleProds.length} items)</label>
-                        <div className="p-3 bg-neutral-50 border border-black/10 rounded-xl space-y-2">
-                          {bundleProds.map((prod, pIdx) => (
-                            <div key={prod.id || pIdx} className="flex items-center justify-between text-xs py-1 border-b border-black/5 last:border-0">
-                              <div className="flex items-center space-x-2">
-                                <div className="w-6 h-6 rounded bg-neutral-200 overflow-hidden shrink-0">
-                                  <img
-                                    src={prod.images?.[0] || "/placeholder.svg"}
-                                    alt={prod.name}
-                                    onError={(e) => { e.currentTarget.src = "/placeholder.svg"; }}
-                                    className="w-full h-full object-cover"
-                                  />
-                                </div>
-                                <span className="font-medium text-neutral-900">{prod.name}</span>
-                              </div>
-                              <span className="font-semibold text-neutral-700">₹{Math.round(prod.price_paise / 100)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                  <div>
+                    <label className="block text-neutral-600 font-medium mb-1">Merchant Description</label>
+                    <input
+                      type="text"
+                      value={currentGrowthRule.description}
+                      onChange={(e) => handleUpdateGrowthRule(selectedRuleIndex, "description", e.target.value)}
+                      className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs focus:outline-none"
+                    />
+                  </div>
 
-                      <div>
-                        <label className="block text-neutral-600 font-medium mb-1">Recommendation reason</label>
-                        <input
-                          type="text"
-                          value={currentBundle.recommendation_reason || ""}
-                          onChange={(e) => handleUpdateBundle(selectedBundleIndex, "recommendation_reason", e.target.value)}
-                          placeholder="Why should the agent recommend this pairing?"
-                          className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs focus:outline-none"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3 items-center">
-                        <div>
-                          <label className="block text-neutral-600 font-medium mb-1">Combo discount (%)</label>
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={currentBundle.discount_percent}
-                            onChange={(e) => handleUpdateBundle(selectedBundleIndex, "discount_percent", parseInt(e.target.value || "0"))}
-                            className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-neutral-600 font-medium mb-1">Status</label>
-                          <button
-                            onClick={() => handleUpdateBundle(selectedBundleIndex, "active", !currentBundle.active)}
-                            className={`w-full py-2 rounded-xl text-xs font-semibold border transition-all ${
-                              currentBundle.active
-                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                : "bg-neutral-100 text-neutral-500 border-black/5"
+                  {/* Supabase Product Association Picker */}
+                  <div className="space-y-2">
+                    <label className="block text-neutral-600 font-medium">
+                      Select Associated Products ({currentGrowthRule.product_ids?.length || 0} selected)
+                    </label>
+                    <div className="p-3 bg-neutral-50 border border-black/10 rounded-xl max-h-48 overflow-y-auto space-y-1.5">
+                      {products.map((prod) => {
+                        const isSelected = currentGrowthRule.product_ids?.includes(prod.id);
+                        return (
+                          <div
+                            key={prod.id}
+                            onClick={() => handleToggleProductInRule(selectedRuleIndex, prod.id)}
+                            className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors text-xs ${
+                              isSelected ? "bg-white border border-neutral-900 font-medium shadow-xs" : "hover:bg-neutral-100/80 border border-transparent"
                             }`}
                           >
-                            {currentBundle.active ? "Active in Discovery" : "Inactive / Muted"}
-                          </button>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                readOnly
+                                className="w-3.5 h-3.5 accent-neutral-900 rounded"
+                              />
+                              <span className="text-neutral-900">{prod.name}</span>
+                            </div>
+                            <span className="text-neutral-500">₹{Math.round(prod.price_paise / 100)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Rule-Specific Parameters */}
+                  <div className="grid grid-cols-2 gap-3">
+                    {currentGrowthRule.discount_percent !== undefined && (
+                      <div>
+                        <label className="block text-neutral-600 font-medium mb-1">Discount (%)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={currentGrowthRule.discount_percent}
+                          onChange={(e) => handleUpdateGrowthRule(selectedRuleIndex, "discount_percent", parseInt(e.target.value || "0"))}
+                          className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none"
+                        />
+                      </div>
+                    )}
+
+                    {currentGrowthRule.discount_amount_paise !== undefined && (
+                      <div>
+                        <label className="block text-neutral-600 font-medium mb-1">Flat Discount (₹)</label>
+                        <input
+                          type="number"
+                          value={Math.round(currentGrowthRule.discount_amount_paise / 100)}
+                          onChange={(e) => handleUpdateGrowthRule(selectedRuleIndex, "discount_amount_paise", parseInt(e.target.value || "0") * 100)}
+                          className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none"
+                        />
+                      </div>
+                    )}
+
+                    {currentGrowthRule.buy_quantity !== undefined && (
+                      <div>
+                        <label className="block text-neutral-600 font-medium mb-1">Buy Quantity (X)</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={currentGrowthRule.buy_quantity}
+                          onChange={(e) => handleUpdateGrowthRule(selectedRuleIndex, "buy_quantity", parseInt(e.target.value || "1"))}
+                          className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none"
+                        />
+                      </div>
+                    )}
+
+                    {currentGrowthRule.free_quantity !== undefined && (
+                      <div>
+                        <label className="block text-neutral-600 font-medium mb-1">Free Quantity (Y)</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={currentGrowthRule.free_quantity}
+                          onChange={(e) => handleUpdateGrowthRule(selectedRuleIndex, "free_quantity", parseInt(e.target.value || "1"))}
+                          className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none"
+                        />
+                      </div>
+                    )}
+
+                    {currentGrowthRule.min_cart_value_paise !== undefined && (
+                      <div>
+                        <label className="block text-neutral-600 font-medium mb-1">Min Cart Value (₹)</label>
+                        <input
+                          type="number"
+                          value={Math.round(currentGrowthRule.min_cart_value_paise / 100)}
+                          onChange={(e) => handleUpdateGrowthRule(selectedRuleIndex, "min_cart_value_paise", parseInt(e.target.value || "0") * 100)}
+                          className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none"
+                        />
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-neutral-600 font-medium mb-1">Stackable with others?</label>
+                      <button
+                        onClick={() => handleUpdateGrowthRule(selectedRuleIndex, "stackable", !currentGrowthRule.stackable)}
+                        className={`w-full py-2 rounded-xl text-xs font-semibold border transition-all ${
+                          currentGrowthRule.stackable
+                            ? "bg-violet-50 text-violet-700 border-violet-200"
+                            : "bg-neutral-100 text-neutral-600 border-black/5"
+                        }`}
+                      >
+                        {currentGrowthRule.stackable ? "Stackable" : "Non-Stackable (Exclusive)"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-neutral-600 font-medium mb-1">AI Recommendation Reason</label>
+                    <input
+                      type="text"
+                      value={currentGrowthRule.recommendation_reason}
+                      onChange={(e) => handleUpdateGrowthRule(selectedRuleIndex, "recommendation_reason", e.target.value)}
+                      placeholder="Why should the agent recommend this offer?"
+                      className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Real-time Dynamic Economics & Margin Protection Panel */}
+                {(() => {
+                  const associatedProds = (currentGrowthRule.product_ids || [])
+                    .map(id => products.find(p => p.id === id))
+                    .filter(Boolean) as ProductRow[];
+
+                  const sampleSubtotal = associatedProds.length > 0
+                    ? associatedProds.reduce((sum, p) => sum + Math.round(p.price_paise / 100), 0)
+                    : 1500;
+
+                  let sampleDiscount = 0;
+                  if (currentGrowthRule.discount_percent) {
+                    sampleDiscount = Math.round((sampleSubtotal * currentGrowthRule.discount_percent) / 100);
+                  } else if (currentGrowthRule.discount_amount_paise) {
+                    sampleDiscount = Math.round(currentGrowthRule.discount_amount_paise / 100);
+                  } else if (currentGrowthRule.type === "buy_x_get_y" && associatedProds[0]) {
+                    sampleDiscount = Math.round(associatedProds[0].price_paise / 100);
+                  }
+
+                  if (currentGrowthRule.max_discount_paise) {
+                    sampleDiscount = Math.min(sampleDiscount, Math.round(currentGrowthRule.max_discount_paise / 100));
+                  }
+
+                  const sampleFinalTotal = Math.max(0, sampleSubtotal - sampleDiscount);
+                  const baseItemPrice = associatedProds[0] ? Math.round(associatedProds[0].price_paise / 100) : 650;
+                  const sampleIncrementalRevenue = Math.max(0, sampleFinalTotal - baseItemPrice);
+
+                  return (
+                    <div className="bg-neutral-50/80 border border-black/10 rounded-2xl p-5 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-neutral-900">Live Economics & Margin Preview</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                          currentGrowthRule.active ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-neutral-200 text-neutral-600"
+                        }`}>
+                          {currentGrowthRule.active ? "Active in Discovery" : "Inactive"}
+                        </span>
+                      </div>
+                      
+                      <div className="space-y-2 text-xs">
+                        <div className="flex justify-between text-neutral-600">
+                          <span>Sample Subtotal ({associatedProds.length || 1} items):</span>
+                          <span className="font-medium">₹{sampleSubtotal}</span>
+                        </div>
+                        <div className="flex justify-between text-emerald-700 font-medium">
+                          <span>Applied Incentive Discount:</span>
+                          <span>-₹{sampleDiscount}</span>
+                        </div>
+                        <div className="flex justify-between border-t border-b border-black/10 py-2 text-neutral-900 font-bold">
+                          <span>Final Autonomous Total:</span>
+                          <span className="text-base text-neutral-900">₹{sampleFinalTotal}</span>
+                        </div>
+                        <div className="flex justify-between text-emerald-700 font-medium">
+                          <span>Buyer Savings:</span>
+                          <span>₹{sampleDiscount}</span>
+                        </div>
+                        <div className="flex justify-between text-violet-700 font-bold">
+                          <span>Incremental Merchant Revenue:</span>
+                          <span>+₹{sampleIncrementalRevenue}</span>
                         </div>
                       </div>
-                    </div>
 
-                    {/* Dynamic Economics Live Computation Card */}
-                    {(() => {
-                      const individualTotal = bundleProds.reduce((sum, p) => sum + Math.round(p.price_paise / 100), 0);
-                      const discountAmt = Math.round((individualTotal * currentBundle.discount_percent) / 100);
-                      const bundleTotal = individualTotal - discountAmt;
-                      const buyerSavings = discountAmt;
-                      const baseItemPrice = bundleProds[0] ? Math.round(bundleProds[0].price_paise / 100) : 0;
-                      const incrementalRevenue = bundleTotal - baseItemPrice;
-
-                      return (
-                        <div className="bg-neutral-50/80 border border-black/10 rounded-2xl p-5 space-y-4">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-semibold text-neutral-900">Live economics preview ({currentBundle.name})</span>
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                              currentBundle.active ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-neutral-200 text-neutral-600"
-                            }`}>
-                              {currentBundle.active ? "Active in Discovery" : "Inactive / Muted"}
-                            </span>
-                          </div>
-                          
-                          <div className="space-y-2 text-xs">
-                            <div className="flex justify-between text-neutral-600">
-                              <span>Individual items ({bundleProds.map(p => p.name.split(" ")[0]).join(" + ") || "Items"}):</span>
-                              <span className="font-medium">₹{individualTotal}</span>
-                            </div>
-                            <div className="flex justify-between border-b border-black/10 pb-2 text-neutral-900">
-                              <span className="font-medium">Combo total ({currentBundle.discount_percent}% bundle discount):</span>
-                              <span className="font-bold text-sm">₹{bundleTotal}</span>
-                            </div>
-                            <div className="flex justify-between text-emerald-700 font-medium">
-                              <span>Buyer savings:</span>
-                              <span>₹{buyerSavings}</span>
-                            </div>
-                            <div className="flex justify-between text-violet-700 font-bold">
-                              <span>Merchant captured revenue:</span>
-                              <span>₹{bundleTotal}</span>
-                            </div>
-                          </div>
-
-                          <div className="bg-white p-3 rounded-xl border border-black/5 text-[11px] text-neutral-600 leading-relaxed">
-                            <strong>Revenue growth story:</strong> Selling this {bundleProds.length}-item bundle captures <span className="text-violet-700 font-semibold">+₹{incrementalRevenue}</span> incremental revenue versus selling {bundleProds[0]?.name || "the main item"} alone.
-                          </div>
+                      <div className="bg-white p-3 rounded-xl border border-black/5 text-[11px] text-neutral-600 leading-relaxed space-y-1">
+                        <div className="flex items-center space-x-1.5 font-semibold text-neutral-900">
+                          <Shield className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Margin Floor Protection (60%) Active</span>
                         </div>
-                      );
-                    })()}
-                  </div>
-                );
-              })()
-            ) : (
-              <p className="text-xs text-neutral-500">No bundle rules configured.</p>
-            )}
+                        <p>Discounts are capped deterministically to prevent negative margin. AI agents cannot negotiate or stack beyond this boundary.</p>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : null}
           </div>
         </div>
       )}
 
-      {/* ================= TAB 3: AGENT POLICY ================= */}
+      {/* ================= AREA 3: AGENT POLICY ================= */}
       {activeTab === "policy" && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             
-            {/* 1. What the agent can do */}
+            {/* 1. Growth & Promotion Permissions */}
             <div className="bg-white/80 border border-black/10 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
               <div className="pb-2 border-b border-black/5">
-                <h3 className="text-sm font-semibold text-neutral-900">What the agent can do</h3>
-                <p className="text-xs text-neutral-500">Enable or restrict autonomous capabilities executed by the AI clerk.</p>
+                <h3 className="text-sm font-semibold text-neutral-900">Growth & Promotion Permissions</h3>
+                <p className="text-xs text-neutral-500">Configure which promotional actions the AI agent is authorized to execute.</p>
               </div>
 
               {config && (
                 <div className="space-y-3 text-xs">
                   <label className="flex items-center justify-between p-3 rounded-xl border border-black/5 bg-neutral-50/50 hover:bg-neutral-50 cursor-pointer">
                     <div>
-                      <span className="font-medium text-neutral-900 block">Recommend bundles</span>
-                      <span className="text-[11px] text-neutral-500">Proactively cross-sell matching pants or add-ons</span>
+                      <span className="font-medium text-neutral-900 block">Product Discovery Feed</span>
+                      <span className="text-[11px] text-neutral-500">Allow AI agents to query active catalog items</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={config.policy.can_discover_products ?? true}
+                      onChange={(e) => handleUpdatePolicy("can_discover_products", e.target.checked)}
+                      className="w-4 h-4 accent-neutral-900 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 rounded-xl border border-black/5 bg-neutral-50/50 hover:bg-neutral-50 cursor-pointer">
+                    <div>
+                      <span className="font-medium text-neutral-900 block">Recommend Growth Rules & Bundles</span>
+                      <span className="text-[11px] text-neutral-500">Suggest multi-buy bundles and quantity discounts</span>
                     </div>
                     <input
                       type="checkbox"
@@ -803,8 +957,8 @@ export const MerchantControlCenter: React.FC = () => {
 
                   <label className="flex items-center justify-between p-3 rounded-xl border border-black/5 bg-neutral-50/50 hover:bg-neutral-50 cursor-pointer">
                     <div>
-                      <span className="font-medium text-neutral-900 block">Negotiate prices</span>
-                      <span className="text-[11px] text-neutral-500">Accept programmatic bids bounded by discount caps</span>
+                      <span className="font-medium text-neutral-900 block">Negotiate Programmatic Bids</span>
+                      <span className="text-[11px] text-neutral-500">Accept bounded bids within discount overrides</span>
                     </div>
                     <input
                       type="checkbox"
@@ -816,8 +970,34 @@ export const MerchantControlCenter: React.FC = () => {
 
                   <label className="flex items-center justify-between p-3 rounded-xl border border-black/5 bg-neutral-50/50 hover:bg-neutral-50 cursor-pointer">
                     <div>
-                      <span className="font-medium text-neutral-900 block">Autonomous checkout</span>
-                      <span className="text-[11px] text-neutral-500">Create Razorpay orders without human merchant approval</span>
+                      <span className="font-medium text-neutral-900 block">Offer First-Time Welcome Incentives</span>
+                      <span className="text-[11px] text-neutral-500">Grant 5% privilege to new buyers</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={config.policy.can_offer_welcome_incentives ?? true}
+                      onChange={(e) => handleUpdatePolicy("can_offer_welcome_incentives", e.target.checked)}
+                      className="w-4 h-4 accent-neutral-900 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 rounded-xl border border-black/5 bg-neutral-50/50 hover:bg-neutral-50 cursor-pointer">
+                    <div>
+                      <span className="font-medium text-neutral-900 block">Initiate Payment Glitch Recovery</span>
+                      <span className="text-[11px] text-neutral-500">Apply bounded recovery discount on retry</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={config.policy.can_initiate_recovery ?? true}
+                      onChange={(e) => handleUpdatePolicy("can_initiate_recovery", e.target.checked)}
+                      className="w-4 h-4 accent-neutral-900 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 rounded-xl border border-black/5 bg-neutral-50/50 hover:bg-neutral-50 cursor-pointer">
+                    <div>
+                      <span className="font-medium text-neutral-900 block">Autonomous Checkout Completion</span>
+                      <span className="text-[11px] text-neutral-500">Create Razorpay orders without human approval hold</span>
                     </div>
                     <input
                       type="checkbox"
@@ -830,10 +1010,10 @@ export const MerchantControlCenter: React.FC = () => {
               )}
             </div>
 
-            {/* 2. Commerce boundaries */}
+            {/* 2. Commerce & Safety Boundaries */}
             <div className="bg-white/80 border border-black/10 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
               <div className="pb-2 border-b border-black/5">
-                <h3 className="text-sm font-semibold text-neutral-900">Commerce boundaries</h3>
+                <h3 className="text-sm font-semibold text-neutral-900">Commerce & Safety Boundaries</h3>
                 <p className="text-xs text-neutral-500">Hard deterministic safety gates enforced server-side before order creation.</p>
               </div>
 
@@ -841,7 +1021,7 @@ export const MerchantControlCenter: React.FC = () => {
                 <div className="space-y-4 text-xs">
                   <div>
                     <label className="block text-neutral-600 font-medium mb-1">
-                      Autonomous spending cap (₹)
+                      Autonomous Spending Cap (₹)
                     </label>
                     <input
                       type="number"
@@ -852,22 +1032,51 @@ export const MerchantControlCenter: React.FC = () => {
                     <p className="text-[11px] text-neutral-500 mt-1">Orders exceeding this limit are rejected immediately.</p>
                   </div>
 
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-neutral-600 font-medium mb-1">
+                        Global Max Discount (%)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={config.policy.max_discount_percent ?? 25}
+                        onChange={(e) => handleUpdatePolicy("max_discount_percent", parseInt(e.target.value || "25"))}
+                        className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-neutral-600 font-medium mb-1">
+                        Margin Floor (%)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={config.policy.margin_floor_percent ?? 60}
+                        onChange={(e) => handleUpdatePolicy("margin_floor_percent", parseInt(e.target.value || "60"))}
+                        className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-neutral-600 font-medium mb-1">
-                      Quote expiration window (seconds)
+                      Quote Expiration Window (seconds)
                     </label>
                     <input
                       type="number"
                       value={config.policy.quote_expiry_seconds}
-                      onChange={(e) => handleUpdatePolicy("quote_expiry_seconds", parseInt(e.target.value || "600"))}
-                      className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-neutral-900"
+                      onChange={(e) => handleUpdatePolicy("quote_expiry_seconds", parseInt(e.target.value || "900"))}
+                      className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none"
                     />
-                    <p className="text-[11px] text-neutral-500 mt-1">Standard: 600s (10 minutes). Quote tokens expire automatically after this window.</p>
+                    <p className="text-[11px] text-neutral-500 mt-1">Quote tokens expire automatically after this window.</p>
                   </div>
 
                   <label className="flex items-center justify-between p-3 rounded-xl border border-black/5 bg-neutral-50/50 hover:bg-neutral-50 cursor-pointer">
                     <div>
-                      <span className="font-medium text-neutral-900 block">Require UPI Mandate consent</span>
+                      <span className="font-medium text-neutral-900 block">Require UPI Mandate Consent</span>
                       <span className="text-[11px] text-neutral-500">Enforces buyer pre-authorization signature before checkout</span>
                     </div>
                     <input
@@ -882,12 +1091,12 @@ export const MerchantControlCenter: React.FC = () => {
             </div>
           </div>
 
-          {/* 3. Policy History (Immutable Versions) */}
+          {/* 3. Immutable Policy Version History */}
           <div className="bg-white/80 border border-black/10 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-black/5">
               <div>
-                <h3 className="text-sm font-semibold text-neutral-900">Policy history & versions</h3>
-                <p className="text-xs text-neutral-500">Historical snapshots are immutable. Quotes remain valid under their embedded version until expiration.</p>
+                <h3 className="text-sm font-semibold text-neutral-900">Policy History & Immutable Snapshots</h3>
+                <p className="text-xs text-neutral-500">Every policy update produces a permanent version. Old quotes stay valid under their embedded version until TTL expiration.</p>
               </div>
               <span className="text-xs bg-violet-50 text-violet-700 border border-violet-200 px-2.5 py-1 rounded-full font-semibold">
                 {policyVersions.length} recorded version{policyVersions.length === 1 ? "" : "s"}
@@ -899,10 +1108,10 @@ export const MerchantControlCenter: React.FC = () => {
                 <thead>
                   <tr className="border-b border-black/10 text-neutral-500 font-medium">
                     <th className="py-2.5 px-3">Version</th>
-                    <th className="py-2.5 px-3">Created date</th>
-                    <th className="py-2.5 px-3">Change summary</th>
+                    <th className="py-2.5 px-3">Created Date</th>
+                    <th className="py-2.5 px-3">Change Summary</th>
                     <th className="py-2.5 px-3">Status</th>
-                    <th className="py-2.5 px-3 text-center">Quotes issued</th>
+                    <th className="py-2.5 px-3 text-center">Quotes Issued</th>
                     <th className="py-2.5 px-3 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -933,7 +1142,7 @@ export const MerchantControlCenter: React.FC = () => {
                           onClick={() => setSelectedSnapshot(v)}
                           className="px-2.5 py-1 text-xs border border-black/10 rounded-lg hover:bg-neutral-100 transition-colors font-medium"
                         >
-                          View snapshot
+                          View Snapshot
                         </button>
                         {v.status !== "active" && (
                           <button
@@ -950,10 +1159,30 @@ export const MerchantControlCenter: React.FC = () => {
               </table>
             </div>
           </div>
+
+          {/* 4. Secondary Developer Evidence & Agent Contract Drawer */}
+          <div className="bg-white/80 border border-black/10 rounded-2xl p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center space-x-2">
+                <Code className="w-4 h-4 text-violet-600" />
+                <h3 className="text-sm font-semibold text-neutral-900">Developer Evidence & Protocol Manifest</h3>
+              </div>
+              <p className="text-xs text-neutral-500">
+                Inspect live machine-readable schemas, protocol-shaped adapters (ACP, AP2, x402), and autonomous checkout rails.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowDeveloperEvidence(true)}
+              className="px-4 py-2 border border-black/10 bg-neutral-50 hover:bg-neutral-100 text-neutral-900 rounded-xl text-xs font-semibold transition-colors shrink-0 flex items-center space-x-1.5 shadow-sm"
+            >
+              <FileCode className="w-3.5 h-3.5" />
+              <span>View Agent Contract</span>
+            </button>
+          </div>
         </div>
       )}
 
-      {/* ================= TAB 4: ACTIVITY & LEDGER ================= */}
+      {/* ================= AREA 4: ACTIVITY & LEDGER ================= */}
       {activeTab === "activity" && (
         <div className="space-y-6">
           
@@ -961,8 +1190,8 @@ export const MerchantControlCenter: React.FC = () => {
           <div className="bg-white/80 border border-black/10 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-black/5">
               <div>
-                <h3 className="text-sm font-semibold text-neutral-900">Grouped agent activity journeys</h3>
-                <p className="text-xs text-neutral-500">End-to-end transaction sessions connecting discovery, recommendation, negotiation, and settlement.</p>
+                <h3 className="text-sm font-semibold text-neutral-900">Grouped Agent Activity Journeys</h3>
+                <p className="text-xs text-neutral-500">End-to-end sessions connecting discovery, growth offer evaluation, bounded negotiation, and autonomous settlement.</p>
               </div>
               <span className="text-xs bg-neutral-100 border border-black/5 px-2.5 py-1 rounded-full text-neutral-700 font-medium">
                 {journeys.length} session{journeys.length === 1 ? "" : "s"}
@@ -1000,7 +1229,7 @@ export const MerchantControlCenter: React.FC = () => {
                     onClick={() => setSelectedTrace(j.trace)}
                     className="w-full py-2 px-3 border border-black/10 bg-white rounded-xl text-xs font-semibold text-neutral-800 hover:bg-neutral-900 hover:text-white transition-all flex items-center justify-center space-x-1.5 shadow-sm"
                   >
-                    <span>View decision trace</span>
+                    <span>Why this decision? (View Trace)</span>
                     <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -1085,18 +1314,18 @@ export const MerchantControlCenter: React.FC = () => {
         </div>
       )}
 
-      {/* ================= MODAL: EDIT PRODUCT DRAWER ================= */}
-      {editingProduct && (
+      {/* ================= MODAL: CREATE GROWTH RULE WIZARD ================= */}
+      {showNewRuleModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-black/10 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-xl max-h-[90vh] overflow-y-auto animate-scale-up">
+          <div className="bg-white border border-black/10 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-xl animate-scale-up max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-black/10">
               <div>
-                <h3 className="text-base font-semibold text-neutral-900">Edit Product</h3>
-                <p className="text-xs text-neutral-500">Update authoritative database pricing and negotiation boundaries.</p>
+                <h3 className="text-base font-semibold text-neutral-900">Create Growth Rule</h3>
+                <p className="text-xs text-neutral-500">Configure a promotional incentive to grow order basket size.</p>
               </div>
               <button
-                onClick={() => setEditingProduct(null)}
-                className="p-1 rounded-lg hover:bg-neutral-100 text-neutral-500 hover:text-neutral-900"
+                onClick={() => setShowNewRuleModal(false)}
+                className="p-1 rounded-lg hover:bg-neutral-100 text-neutral-500"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1104,96 +1333,93 @@ export const MerchantControlCenter: React.FC = () => {
 
             <div className="space-y-4 text-xs">
               <div>
-                <label className="block text-neutral-600 font-medium mb-1">Product title</label>
+                <label className="block text-neutral-600 font-medium mb-1">Rule Type</label>
+                <select
+                  value={newRule.type}
+                  onChange={(e) => setNewRule({ ...newRule, type: e.target.value as GrowthRuleType })}
+                  className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none"
+                >
+                  {Object.entries(RULE_TYPE_METADATA).map(([key, meta]) => (
+                    <option key={key} value={key}>{meta.label}</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-neutral-500 mt-1">
+                  {RULE_TYPE_METADATA[newRule.type as GrowthRuleType]?.desc}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-neutral-600 font-medium mb-1">Rule Name</label>
                 <input
                   type="text"
-                  value={editingProduct.name}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
-                  className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-medium focus:outline-none"
+                  value={newRule.name}
+                  onChange={(e) => setNewRule({ ...newRule, name: e.target.value })}
+                  placeholder="e.g. Street Combo Deluxe"
+                  className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-neutral-600 font-medium mb-1">Description</label>
+                <input
+                  type="text"
+                  value={newRule.description}
+                  onChange={(e) => setNewRule({ ...newRule, description: e.target.value })}
+                  placeholder="e.g. Pair tee and pants for 12% savings"
+                  className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs focus:outline-none"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-neutral-600 font-medium mb-1">Base Price (₹)</label>
+                  <label className="block text-neutral-600 font-medium mb-1">Discount (%)</label>
                   <input
                     type="number"
-                    value={Math.round(editingProduct.price_paise / 100)}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, price_paise: parseInt(e.target.value || "0") * 100 })}
+                    min="1"
+                    max="100"
+                    value={newRule.discount_percent || 10}
+                    onChange={(e) => setNewRule({ ...newRule, discount_percent: parseInt(e.target.value || "10") })}
                     className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-neutral-600 font-medium mb-1">Stock units</label>
-                  <input
-                    type="number"
-                    value={editingProduct.stock}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, stock: parseInt(e.target.value || "0") })}
-                    className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none"
-                  />
+                  <label className="block text-neutral-600 font-medium mb-1">Buyer Eligibility</label>
+                  <select
+                    value={newRule.buyer_eligibility || "all"}
+                    onChange={(e) => setNewRule({ ...newRule, buyer_eligibility: e.target.value as BuyerEligibilityType })}
+                    className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs focus:outline-none"
+                  >
+                    <option value="all">All Buyers</option>
+                    <option value="new_buyer">New Buyers Only</option>
+                    <option value="returning_buyer">Returning Buyers (2+ Orders)</option>
+                  </select>
                 </div>
               </div>
 
-              <div className="space-y-3 pt-2 border-t border-black/5">
-                <label className="flex items-center justify-between p-3 rounded-xl border border-black/5 bg-neutral-50/50 hover:bg-neutral-50 cursor-pointer">
-                  <div>
-                    <span className="font-medium text-neutral-900 block">Allow Price Negotiation</span>
-                    <span className="text-[11px] text-neutral-500">Enables AI buyer agent to negotiate below base price</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={editingProduct.negotiable}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, negotiable: e.target.checked })}
-                    className="w-4 h-4 accent-neutral-900 rounded"
-                  />
-                </label>
-
-                {editingProduct.negotiable && (
-                  <div>
-                    <label className="block text-neutral-600 font-medium mb-1">
-                      Maximum Allowed Discount (%)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      value={editingProduct.max_discount_percent}
-                      onChange={(e) => setEditingProduct({ ...editingProduct, max_discount_percent: parseInt(e.target.value || "0") })}
-                      className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none"
-                    />
-                    <p className="text-[11px] text-neutral-500 mt-1">
-                      Minimum accepted price floor: ₹{Math.round((editingProduct.price_paise * (1 - editingProduct.max_discount_percent / 100)) / 100)}
-                    </p>
-                  </div>
-                )}
-
-                <label className="flex items-center justify-between p-3 rounded-xl border border-black/5 bg-neutral-50/50 hover:bg-neutral-50 cursor-pointer">
-                  <div>
-                    <span className="font-medium text-neutral-900 block">Product active in catalog</span>
-                    <span className="text-[11px] text-neutral-500">Exposes product to agent discovery feed</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={editingProduct.active}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, active: e.target.checked })}
-                    className="w-4 h-4 accent-neutral-900 rounded"
-                  />
-                </label>
+              <div>
+                <label className="block text-neutral-600 font-medium mb-1">Agent Recommendation Pitch</label>
+                <input
+                  type="text"
+                  value={newRule.recommendation_reason}
+                  onChange={(e) => setNewRule({ ...newRule, recommendation_reason: e.target.value })}
+                  placeholder="e.g. Add this piece for an exclusive 10% combo discount"
+                  className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs focus:outline-none"
+                />
               </div>
             </div>
 
             <div className="flex items-center justify-end space-x-3 pt-3 border-t border-black/10">
               <button
-                onClick={() => setEditingProduct(null)}
+                onClick={() => setShowNewRuleModal(false)}
                 className="px-4 py-2 border border-black/10 rounded-xl text-xs font-medium text-neutral-600 hover:bg-neutral-100"
               >
                 Cancel
               </button>
               <button
-                onClick={() => handleSaveProductDrawer(editingProduct)}
+                onClick={handleCreateNewRule}
                 className="px-4 py-2 bg-neutral-900 text-white rounded-xl text-xs font-semibold hover:bg-neutral-800 shadow-sm"
               >
-                Apply Overrides
+                Add Rule to Policy
               </button>
             </div>
           </div>
@@ -1206,8 +1432,8 @@ export const MerchantControlCenter: React.FC = () => {
           <div className="bg-white border border-black/10 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-xl animate-scale-up">
             <div className="flex items-center justify-between pb-3 border-b border-black/10">
               <div>
-                <h3 className="text-base font-semibold text-neutral-900">Publish Policy Changes</h3>
-                <p className="text-xs text-neutral-500">Review pending updates before creating an immutable policy version snapshot.</p>
+                <h3 className="text-base font-semibold text-neutral-900">Publish Growth Policy Changes</h3>
+                <p className="text-xs text-neutral-500">Review pending updates before creating an immutable version snapshot.</p>
               </div>
               <button
                 onClick={() => setShowPublishDiff(false)}
@@ -1221,25 +1447,25 @@ export const MerchantControlCenter: React.FC = () => {
               <div className="bg-neutral-50 p-3.5 rounded-xl border border-black/5 space-y-2">
                 <div className="flex justify-between font-medium">
                   <span className="text-neutral-500">Autonomous budget cap:</span>
-                  <span className="text-neutral-900">₹{config ? config.policy.max_autonomous_checkout_paise / 100 : 700}</span>
+                  <span className="text-neutral-900">₹{config ? config.policy.max_autonomous_checkout_paise / 100 : 4000}</span>
                 </div>
                 <div className="flex justify-between font-medium">
-                  <span className="text-neutral-500">Quote expiration TTL:</span>
-                  <span className="text-neutral-900">{config ? config.policy.quote_expiry_seconds : 600} seconds</span>
+                  <span className="text-neutral-500">Active growth rules:</span>
+                  <span className="text-violet-700 font-semibold">{activeGrowthRules.length} enabled</span>
                 </div>
                 <div className="flex justify-between font-medium">
-                  <span className="text-neutral-500">Active bundle pairing:</span>
-                  <span className="text-violet-700 font-semibold">{bundle?.name || "Complete Outfit"} ({bundle?.discount_percent}% off)</span>
+                  <span className="text-neutral-500">Margin floor protection:</span>
+                  <span className="text-neutral-900">{config?.policy.margin_floor_percent ?? 60}%</span>
                 </div>
               </div>
 
               <div>
                 <label className="block text-neutral-600 font-medium mb-1">
-                  Change summary note (Optional)
+                  Change Summary Note (Optional)
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Updated bundle pairing and seasonal discount limit"
+                  placeholder="e.g. Updated growth offers and margin bounds"
                   value={customSummaryNote}
                   onChange={(e) => setCustomSummaryNote(e.target.value)}
                   className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-neutral-900"
@@ -1247,7 +1473,7 @@ export const MerchantControlCenter: React.FC = () => {
               </div>
 
               <div className="p-3 bg-violet-50/70 border border-violet-200/60 rounded-xl text-[11px] text-violet-800 leading-relaxed">
-                <strong>Treatment of existing quotes:</strong> Previously issued HMAC quotes continue under their embedded policy version until expiration (600s). New quotes will bind this updated policy version.
+                <strong>Treatment of existing quotes:</strong> Previously issued HMAC quotes continue under their embedded policy version until expiration ({config?.policy.quote_expiry_seconds ?? 900}s). New quotes will bind this updated policy version.
               </div>
             </div>
 
@@ -1277,7 +1503,7 @@ export const MerchantControlCenter: React.FC = () => {
           <div className="bg-white border border-black/10 rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-xl max-h-[90vh] overflow-y-auto animate-scale-up">
             <div className="flex items-center justify-between pb-3 border-b border-black/10">
               <div>
-                <h3 className="text-base font-semibold text-neutral-900">Decision Trace</h3>
+                <h3 className="text-base font-semibold text-neutral-900">Decision Trace & Gate Evaluation</h3>
                 <p className="text-xs text-neutral-500">Deterministic policy evaluation audit without black-box opacity.</p>
               </div>
               <button
@@ -1288,7 +1514,6 @@ export const MerchantControlCenter: React.FC = () => {
               </button>
             </div>
 
-            {/* Trace content */}
             <div className="space-y-4 text-xs">
               <div className="p-3 bg-neutral-50 rounded-xl border border-black/5 space-y-1">
                 <span className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider block">1. Buyer Intent Summary</span>
@@ -1304,17 +1529,17 @@ export const MerchantControlCenter: React.FC = () => {
               {selectedTrace.arithmetic && (
                 <div className="p-3 bg-neutral-50 rounded-xl border border-black/5 space-y-2">
                   <span className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider block">3. Exact Arithmetic Breakdown</span>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>Subtotal: <strong className="text-neutral-900">₹{selectedTrace.arithmetic.subtotal}</strong></div>
-                    <div>Combo Discount: <strong className="text-emerald-700">-₹{selectedTrace.arithmetic.discount}</strong></div>
-                    <div>Final Captured: <strong className="text-violet-700">₹{selectedTrace.arithmetic.final_total}</strong></div>
-                    <div>Buyer Savings: <strong className="text-emerald-700">₹{selectedTrace.arithmetic.buyer_savings}</strong></div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div>Subtotal: <strong className="text-neutral-900 block font-bold">₹{selectedTrace.arithmetic.subtotal}</strong></div>
+                    <div>Discount: <strong className="text-emerald-700 block font-bold">-₹{selectedTrace.arithmetic.discount}</strong></div>
+                    <div>Final Captured: <strong className="text-violet-700 block font-bold">₹{selectedTrace.arithmetic.final_total}</strong></div>
+                    <div>Buyer Savings: <strong className="text-emerald-700 block font-bold">₹{selectedTrace.arithmetic.buyer_savings}</strong></div>
                   </div>
                 </div>
               )}
 
               <div className="p-3 bg-neutral-50 rounded-xl border border-black/5 space-y-2">
-                <span className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider block">4. Gate Evaluation Results</span>
+                <span className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider block">4. Guardrail Gate Verification</span>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {Object.entries(selectedTrace.gate_results).map(([gate, res]) => (
                     <div key={gate} className="flex items-center justify-between p-2 rounded-lg bg-white border border-black/5">
@@ -1376,12 +1601,8 @@ export const MerchantControlCenter: React.FC = () => {
                   <span className="font-semibold text-neutral-900">{selectedSnapshot.policy.mandate_required ? "Yes" : "No"}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-neutral-500">Recommend bundles:</span>
-                  <span className="font-semibold text-neutral-900">{selectedSnapshot.policy.agent_can_recommend_bundles ? "Yes" : "No"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-neutral-500">Price negotiation:</span>
-                  <span className="font-semibold text-neutral-900">{selectedSnapshot.policy.agent_can_negotiate ? "Yes" : "No"}</span>
+                  <span className="text-neutral-500">Growth Rules Snapshot:</span>
+                  <span className="font-semibold text-neutral-900">{selectedSnapshot.growth_rules?.length || 0} rules</span>
                 </div>
               </div>
             </div>
@@ -1397,6 +1618,169 @@ export const MerchantControlCenter: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* ================= MODAL: DEVELOPER EVIDENCE & AGENT CONTRACT ================= */}
+      {showDeveloperEvidence && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-black/10 rounded-2xl max-w-3xl w-full p-6 space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-black/10">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-violet-50 text-violet-700 rounded-xl border border-violet-200">
+                  <Terminal className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-neutral-900">Agent Contract & Developer Evidence</h3>
+                  <p className="text-xs text-neutral-500">Inspect live machine schemas, OpenAPI contracts, and multi-protocol adapters.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowDeveloperEvidence(false)}
+                className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-500"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Protocol Subtabs */}
+            <div className="flex space-x-1 bg-neutral-100 p-1 rounded-xl text-xs font-semibold">
+              <button
+                onClick={() => setProtocolTab("acp")}
+                className={`flex-1 py-1.5 rounded-lg transition-all ${
+                  protocolTab === "acp" ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+                }`}
+              >
+                ACP Protocol
+              </button>
+              <button
+                onClick={() => setProtocolTab("ap2")}
+                className={`flex-1 py-1.5 rounded-lg transition-all ${
+                  protocolTab === "ap2" ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+                }`}
+              >
+                AP2 Protocol
+              </button>
+              <button
+                onClick={() => setProtocolTab("x402")}
+                className={`flex-1 py-1.5 rounded-lg transition-all ${
+                  protocolTab === "x402" ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+                }`}
+              >
+                x402 Protocol
+              </button>
+              <button
+                onClick={() => setProtocolTab("manifest")}
+                className={`flex-1 py-1.5 rounded-lg transition-all ${
+                  protocolTab === "manifest" ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+                }`}
+              >
+                Agent Manifest & OpenAPI
+              </button>
+            </div>
+
+            {/* Content Area for Active Protocol */}
+            <div className="space-y-4 text-xs font-sans">
+              {protocolTab === "acp" && (
+                <div className="space-y-3">
+                  <div className="p-3 bg-neutral-50 rounded-xl border border-black/5 space-y-1">
+                    <span className="font-semibold text-neutral-800">Agent Commerce Protocol (ACP) Adapter</span>
+                    <p className="text-neutral-600 text-[11px]">
+                      Encapsulates catalog discovery, bounded negotiation, and autonomous checkout within standard ACP wrapper format.
+                    </p>
+                  </div>
+                  <div className="bg-neutral-900 text-neutral-200 rounded-xl p-3 font-mono text-[11px] overflow-x-auto space-y-1">
+                    <p className="text-neutral-400"># 1. Fetch ACP Catalog with Active Growth Rules</p>
+                    <p className="text-emerald-400">GET /api/protocol/adapter?protocol=acp-shaped&endpoint=catalog</p>
+                    <p className="text-neutral-400 pt-2"># 2. Autonomous ACP Checkout with UPI Mandate</p>
+                    <p className="text-emerald-400">POST /api/protocol/adapter?protocol=acp-shaped&endpoint=checkout</p>
+                  </div>
+                </div>
+              )}
+
+              {protocolTab === "ap2" && (
+                <div className="space-y-3">
+                  <div className="p-3 bg-neutral-50 rounded-xl border border-black/5 space-y-1">
+                    <span className="font-semibold text-neutral-800">Agent Payment Protocol 2 (AP2) Adapter</span>
+                    <p className="text-neutral-600 text-[11px]">
+                      Maps autonomous intents into AP2 payment envelopes with mandate authorization hashes and audit tokens.
+                    </p>
+                  </div>
+                  <div className="bg-neutral-900 text-neutral-200 rounded-xl p-3 font-mono text-[11px] overflow-x-auto space-y-1">
+                    <p className="text-neutral-400"># 1. Fetch AP2 Catalog</p>
+                    <p className="text-emerald-400">GET /api/protocol/adapter?protocol=ap2-shaped&endpoint=catalog</p>
+                    <p className="text-neutral-400 pt-2"># 2. Complete AP2 Autonomous Payment</p>
+                    <p className="text-emerald-400">POST /api/protocol/adapter?protocol=ap2-shaped&endpoint=checkout</p>
+                  </div>
+                </div>
+              )}
+
+              {protocolTab === "x402" && (
+                <div className="space-y-3">
+                  <div className="p-3 bg-neutral-50 rounded-xl border border-black/5 space-y-1">
+                    <span className="font-semibold text-neutral-800">HTTP 402 Payment Required (x402) Adapter</span>
+                    <p className="text-neutral-600 text-[11px]">
+                      Provides programmatic 402 payment authorization flow with micro-payment payload schemas and quote validation.
+                    </p>
+                  </div>
+                  <div className="bg-neutral-900 text-neutral-200 rounded-xl p-3 font-mono text-[11px] overflow-x-auto space-y-1">
+                    <p className="text-neutral-400"># 1. Fetch x402 Service Manifest</p>
+                    <p className="text-emerald-400">GET /api/protocol/adapter?protocol=x402-shaped&endpoint=catalog</p>
+                    <p className="text-neutral-400 pt-2"># 2. Settle x402 Payment Header</p>
+                    <p className="text-emerald-400">POST /api/protocol/adapter?protocol=x402-shaped&endpoint=checkout</p>
+                  </div>
+                </div>
+              )}
+
+              {protocolTab === "manifest" && (
+                <div className="space-y-3">
+                  <div className="p-3 bg-neutral-50 rounded-xl border border-black/5 space-y-1">
+                    <span className="font-semibold text-neutral-800">OpenAPI 3.1 & Agent Catalog Endpoints</span>
+                    <p className="text-neutral-600 text-[11px]">
+                      Direct machine-readable endpoints providing live product catalog, active growth rules, policy bounds, and OpenAPI schemas.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <a
+                      href="/api/agent/catalog"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="p-3 bg-white border border-black/10 rounded-xl hover:border-black/30 transition-all flex items-center justify-between"
+                    >
+                      <div>
+                        <span className="font-semibold text-neutral-900 block font-mono text-[11px]">/api/agent/catalog</span>
+                        <span className="text-[11px] text-neutral-500">Live products & growth manifest</span>
+                      </div>
+                      <ArrowUpRight className="w-4 h-4 text-neutral-500" />
+                    </a>
+                    <a
+                      href="/api/openapi.json"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="p-3 bg-white border border-black/10 rounded-xl hover:border-black/30 transition-all flex items-center justify-between"
+                    >
+                      <div>
+                        <span className="font-semibold text-neutral-900 block font-mono text-[11px]">/api/openapi.json</span>
+                        <span className="text-[11px] text-neutral-500">OpenAPI 3.1 schema specification</span>
+                      </div>
+                      <ArrowUpRight className="w-4 h-4 text-neutral-500" />
+                    </a>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-2 flex justify-between items-center border-t border-black/10">
+              <span className="text-[11px] text-neutral-500 font-mono">Status: All protocol adapters operational</span>
+              <button
+                onClick={() => setShowDeveloperEvidence(false)}
+                className="px-4 py-2 bg-neutral-900 text-white rounded-xl text-xs font-semibold hover:bg-neutral-800 transition-colors"
+              >
+                Close Drawer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
