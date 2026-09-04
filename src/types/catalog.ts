@@ -64,37 +64,55 @@ export interface MerchantCapabilityManifest {
     id: string;
     name: string;
     discount_percent: number;
-    product_a_id: string;
-    product_b_id: string;
+    product_ids?: string[];
+    product_a_id?: string;
+    product_b_id?: string;
+    recommendation_reason?: string;
   }[];
 }
 
 export interface AgentCatalogResponse {
   status: "success" | "error";
-  protocol_version: "a2a-v1.0";
+  version?: string;
+  protocol_version?: string;
+  generated_at?: string;
+  timestamp?: string;
   store: {
     name: string;
-    tagline: string;
+    tagline?: string;
     currency: "INR";
-    supported_payment_rails: string[];
-    merchant_id: string;
+    currency_symbol?: string;
+    supported_payment_rails?: string[];
+    merchant_id?: string;
+    total_products?: number;
+    contact?: {
+      agent_support: string;
+      gateway: string;
+    };
   };
-  timestamp: string;
   merchant_capability_manifest: MerchantCapabilityManifest;
-  filters_applied: {
+  filters_applied?: {
     category?: string;
     max_price_inr?: number;
     in_stock_only?: boolean;
     query?: string;
   };
-  total_items: number;
+  total_items?: number;
   products: AgentProductItem[];
-  agent_instructions: {
+  agent_instructions?: {
     order_endpoint: string;
     quote_endpoint: string;
     currency: string;
     max_recommended_single_cart_inr: number;
     notes: string;
+  };
+  autonomous_checkout?: {
+    endpoint: string;
+    method: string;
+    required_headers: Record<string, string>;
+    supported_protocols: string[];
+    protocol_adapter_endpoint: string;
+    parameters: Record<string, string>;
   };
 }
 

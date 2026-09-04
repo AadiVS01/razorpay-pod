@@ -46,6 +46,7 @@ interface ProductRow {
   max_discount_percent: number;
   sizes: string[];
   colors: string[];
+  images?: string[];
 }
 
 type TabType = "overview" | "catalog" | "policy" | "activity";
@@ -56,6 +57,7 @@ export const MerchantControlCenter: React.FC = () => {
   const [activeVersion, setActiveVersion] = useState<string>("v1");
   const [policyVersions, setPolicyVersions] = useState<(PolicyVersionSnapshot & { quote_count: number })[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
+  const [selectedBundleIndex, setSelectedBundleIndex] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -109,7 +111,8 @@ export const MerchantControlCenter: React.FC = () => {
             negotiable: override.negotiable,
             max_discount_percent: override.max_discount_percent,
             sizes: p.sizes || [],
-            colors: p.colors || []
+            colors: p.colors || [],
+            images: p.images || []
           };
         });
         setProducts(mergedProducts);
@@ -199,11 +202,11 @@ export const MerchantControlCenter: React.FC = () => {
     setEditingProduct(null);
   };
 
-  const handleUpdateBundle = (field: keyof BundleRule, value: any) => {
-    if (!config || !config.bundle_rules[0]) return;
+  const handleUpdateBundle = (index: number, field: keyof BundleRule, value: any) => {
+    if (!config || !config.bundle_rules[index]) return;
     const updated = [...config.bundle_rules];
-    updated[0] = {
-      ...updated[0],
+    updated[index] = {
+      ...updated[index],
       [field]: value
     };
     setConfig({
@@ -219,12 +222,15 @@ export const MerchantControlCenter: React.FC = () => {
     setErrorMsg(null);
 
     // Guard: Prevent same-product bundle pairing
-    const bundle = config.bundle_rules[0];
-    if (bundle && bundle.product_a_id === bundle.product_b_id) {
-      setErrorMsg("Invalid Bundle Pairing: Product A and Product B cannot be the same product.");
-      setSaving(false);
-      setShowPublishDiff(false);
-      return;
+    for (const b of config.bundle_rules) {
+      const ids = b.product_ids || [b.product_a_id, b.product_b_id].filter(Boolean) as string[];
+      const unique = new Set(ids);
+      if (unique.size !== ids.length) {
+        setErrorMsg(`Invalid Bundle Pairing in "${b.name}": A bundle cannot contain duplicate items.`);
+        setSaving(false);
+        setShowPublishDiff(false);
+        return;
+      }
     }
 
     try {
@@ -548,9 +554,19 @@ export const MerchantControlCenter: React.FC = () => {
                 <tbody className="divide-y divide-black/5">
                   {products.map((p) => (
                     <tr key={p.id} className="hover:bg-neutral-50/50 transition-colors">
-                      <td className="py-3 px-3 font-semibold text-neutral-900 flex items-center space-x-2">
-                        <ShoppingBag className="w-4 h-4 text-neutral-400 shrink-0" />
-                        <span>{p.name}</span>
+                      <td className="py-3 px-3 font-semibold text-neutral-900 flex items-center space-x-3">
+                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-neutral-100 border border-black/10 shrink-0 flex items-center justify-center">
+                          <img
+                            src={p.images?.[0] || "/placeholder.svg"}
+                            alt={p.name}
+                            onError={(e) => { e.currentTarget.src = "/placeholder.svg"; }}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div>
+                          <span className="block font-semibold">{p.name}</span>
+                          <span className="text-[11px] text-neutral-400 font-mono">{p.id.substring(0, 8)}...</span>
+                        </div>
                       </td>
                       <td className="py-3 px-3 text-neutral-500">{p.category || "Apparel"}</td>
                       <td className="py-3 px-3 font-medium text-neutral-900">₹{Math.round(p.price_paise / 100)}</td>
@@ -592,140 +608,167 @@ export const MerchantControlCenter: React.FC = () => {
 
           {/* Outfit Bundle Pairing Card */}
           <div className="bg-white/80 border border-black/10 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
-            <div className="pb-2 border-b border-black/5">
-              <h3 className="text-sm font-semibold text-neutral-900">Outfit Bundle Pairing</h3>
-              <p className="text-xs text-neutral-500">Configure cross-sell combinations recommended automatically by the conversational agent.</p>
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-black/5">
+              <div>
+                <h3 className="text-sm font-semibold text-neutral-900">Outfit Bundle Pairing & Multi-Buy Rules</h3>
+                <p className="text-xs text-neutral-500">Configure cross-sell combinations recommended automatically by the conversational agent.</p>
+              </div>
+              <span className="text-xs bg-violet-50 text-violet-700 border border-violet-200 px-2.5 py-1 rounded-full font-semibold">
+                {config?.bundle_rules?.length || 0} configured bundle{config?.bundle_rules?.length === 1 ? "" : "s"}
+              </span>
             </div>
 
-            {bundle ? (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-                {/* Form Controls */}
-                <div className="space-y-4 text-xs">
-                  <div>
-                    <label className="block text-neutral-600 font-medium mb-1">Bundle name</label>
-                    <input
-                      type="text"
-                      value={bundle.name}
-                      onChange={(e) => handleUpdateBundle("name", e.target.value)}
-                      className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-neutral-900"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-neutral-600 font-medium mb-1">Product A (Main item)</label>
-                      <select
-                        value={bundle.product_a_id}
-                        onChange={(e) => handleUpdateBundle("product_a_id", e.target.value)}
-                        className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-medium focus:outline-none"
-                      >
-                        {products.map(p => (
-                          <option key={p.id} value={p.id} disabled={p.id === bundle.product_b_id}>
-                            {p.name} (₹{Math.round(p.price_paise / 100)}) {p.id === bundle.product_b_id ? "— (Already Product B)" : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-neutral-600 font-medium mb-1">Product B (Matching add-on)</label>
-                      <select
-                        value={bundle.product_b_id}
-                        onChange={(e) => handleUpdateBundle("product_b_id", e.target.value)}
-                        className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-medium focus:outline-none"
-                      >
-                        {products.map(p => (
-                          <option key={p.id} value={p.id} disabled={p.id === bundle.product_a_id}>
-                            {p.name} (₹{Math.round(p.price_paise / 100)}) {p.id === bundle.product_a_id ? "— (Already Product A)" : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-neutral-600 font-medium mb-1">Recommendation reason</label>
-                    <input
-                      type="text"
-                      value={bundle.recommendation_reason || ""}
-                      onChange={(e) => handleUpdateBundle("recommendation_reason", e.target.value)}
-                      placeholder="Why should the agent recommend this pairing?"
-                      className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 items-center">
-                    <div>
-                      <label className="block text-neutral-600 font-medium mb-1">Combo discount (%)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={bundle.discount_percent}
-                        onChange={(e) => handleUpdateBundle("discount_percent", parseInt(e.target.value || "0"))}
-                        className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-neutral-600 font-medium mb-1">Status</label>
-                      <button
-                        onClick={() => handleUpdateBundle("active", !bundle.active)}
-                        className={`w-full py-2 rounded-xl text-xs font-semibold border transition-all ${
-                          bundle.active
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            : "bg-neutral-100 text-neutral-500 border-black/5"
-                        }`}
-                      >
-                        {bundle.active ? "Active" : "Muted"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Dynamic Economics Live Computation Card */}
-                {(() => {
-                  const prodA = products.find(p => p.id === bundle.product_a_id);
-                  const prodB = products.find(p => p.id === bundle.product_b_id);
-                  const priceA = prodA ? Math.round(prodA.price_paise / 100) : 649;
-                  const priceB = prodB ? Math.round(prodB.price_paise / 100) : 549;
-                  const individualTotal = priceA + priceB;
-                  const discountAmt = Math.round((individualTotal * bundle.discount_percent) / 100);
-                  const bundleTotal = individualTotal - discountAmt;
-                  const buyerSavings = discountAmt;
-                  const incrementalRevenue = bundleTotal - priceA;
-
-                  return (
-                    <div className="bg-neutral-50/80 border border-black/10 rounded-2xl p-5 space-y-4">
-                      <span className="text-xs font-semibold text-neutral-900 block">Live economics preview</span>
-                      
-                      <div className="space-y-2 text-xs">
-                        <div className="flex justify-between text-neutral-600">
-                          <span>Individual items ({prodA?.name?.split(" ")[0] || "Item A"} + {prodB?.name?.split(" ")[0] || "Item B"}):</span>
-                          <span className="font-medium">₹{individualTotal}</span>
-                        </div>
-                        <div className="flex justify-between border-b border-black/10 pb-2 text-neutral-900">
-                          <span className="font-medium">Combo total ({bundle.discount_percent}% bundle discount):</span>
-                          <span className="font-bold text-sm">₹{bundleTotal}</span>
-                        </div>
-                        <div className="flex justify-between text-emerald-700 font-medium">
-                          <span>Buyer savings:</span>
-                          <span>₹{buyerSavings}</span>
-                        </div>
-                        <div className="flex justify-between text-violet-700 font-bold">
-                          <span>Merchant captured revenue:</span>
-                          <span>₹{bundleTotal}</span>
-                        </div>
-                      </div>
-
-                      <div className="bg-white p-3 rounded-xl border border-black/5 text-[11px] text-neutral-600 leading-relaxed">
-                        <strong>Revenue growth story:</strong> Selling this combo captures <span className="text-violet-700 font-semibold">+₹{incrementalRevenue}</span> incremental revenue versus selling {prodA?.name || "the single item"} alone.
-                      </div>
-                    </div>
-                  );
-                })()}
+            {/* Bundle Selector Tabs */}
+            {config && config.bundle_rules && config.bundle_rules.length > 0 && (
+              <div className="flex flex-wrap gap-2 pb-2">
+                {config.bundle_rules.map((b, idx) => (
+                  <button
+                    key={b.id || idx}
+                    onClick={() => setSelectedBundleIndex(idx)}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all flex items-center space-x-2 ${
+                      selectedBundleIndex === idx
+                        ? "bg-neutral-900 text-white border-neutral-900 shadow-sm"
+                        : "bg-neutral-50 text-neutral-600 border-black/10 hover:bg-neutral-100"
+                    }`}
+                  >
+                    <span>{b.name} ({b.discount_percent}% off)</span>
+                    <span className={`w-2 h-2 rounded-full ${b.active ? "bg-emerald-500" : "bg-neutral-400"}`} />
+                  </button>
+                ))}
               </div>
+            )}
+
+            {config && config.bundle_rules && config.bundle_rules[selectedBundleIndex] ? (
+              (() => {
+                const currentBundle = config.bundle_rules[selectedBundleIndex];
+                const productIds = currentBundle.product_ids || [currentBundle.product_a_id, currentBundle.product_b_id].filter(Boolean) as string[];
+                const bundleProds = productIds.map(id => products.find(p => p.id === id)).filter(Boolean) as ProductRow[];
+
+                return (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                    {/* Form Controls */}
+                    <div className="space-y-4 text-xs">
+                      <div>
+                        <label className="block text-neutral-600 font-medium mb-1">Bundle name</label>
+                        <input
+                          type="text"
+                          value={currentBundle.name}
+                          onChange={(e) => handleUpdateBundle(selectedBundleIndex, "name", e.target.value)}
+                          className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-neutral-900"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="block text-neutral-600 font-medium">Included Products in Bundle ({bundleProds.length} items)</label>
+                        <div className="p-3 bg-neutral-50 border border-black/10 rounded-xl space-y-2">
+                          {bundleProds.map((prod, pIdx) => (
+                            <div key={prod.id || pIdx} className="flex items-center justify-between text-xs py-1 border-b border-black/5 last:border-0">
+                              <div className="flex items-center space-x-2">
+                                <div className="w-6 h-6 rounded bg-neutral-200 overflow-hidden shrink-0">
+                                  <img
+                                    src={prod.images?.[0] || "/placeholder.svg"}
+                                    alt={prod.name}
+                                    onError={(e) => { e.currentTarget.src = "/placeholder.svg"; }}
+                                    className="w-full h-full object-cover"
+                                  />
+                                </div>
+                                <span className="font-medium text-neutral-900">{prod.name}</span>
+                              </div>
+                              <span className="font-semibold text-neutral-700">₹{Math.round(prod.price_paise / 100)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-neutral-600 font-medium mb-1">Recommendation reason</label>
+                        <input
+                          type="text"
+                          value={currentBundle.recommendation_reason || ""}
+                          onChange={(e) => handleUpdateBundle(selectedBundleIndex, "recommendation_reason", e.target.value)}
+                          placeholder="Why should the agent recommend this pairing?"
+                          className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 items-center">
+                        <div>
+                          <label className="block text-neutral-600 font-medium mb-1">Combo discount (%)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={currentBundle.discount_percent}
+                            onChange={(e) => handleUpdateBundle(selectedBundleIndex, "discount_percent", parseInt(e.target.value || "0"))}
+                            className="w-full bg-neutral-50 border border-black/10 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-neutral-600 font-medium mb-1">Status</label>
+                          <button
+                            onClick={() => handleUpdateBundle(selectedBundleIndex, "active", !currentBundle.active)}
+                            className={`w-full py-2 rounded-xl text-xs font-semibold border transition-all ${
+                              currentBundle.active
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : "bg-neutral-100 text-neutral-500 border-black/5"
+                            }`}
+                          >
+                            {currentBundle.active ? "Active in Discovery" : "Inactive / Muted"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Dynamic Economics Live Computation Card */}
+                    {(() => {
+                      const individualTotal = bundleProds.reduce((sum, p) => sum + Math.round(p.price_paise / 100), 0);
+                      const discountAmt = Math.round((individualTotal * currentBundle.discount_percent) / 100);
+                      const bundleTotal = individualTotal - discountAmt;
+                      const buyerSavings = discountAmt;
+                      const baseItemPrice = bundleProds[0] ? Math.round(bundleProds[0].price_paise / 100) : 0;
+                      const incrementalRevenue = bundleTotal - baseItemPrice;
+
+                      return (
+                        <div className="bg-neutral-50/80 border border-black/10 rounded-2xl p-5 space-y-4">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-neutral-900">Live economics preview ({currentBundle.name})</span>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                              currentBundle.active ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-neutral-200 text-neutral-600"
+                            }`}>
+                              {currentBundle.active ? "Active in Discovery" : "Inactive / Muted"}
+                            </span>
+                          </div>
+                          
+                          <div className="space-y-2 text-xs">
+                            <div className="flex justify-between text-neutral-600">
+                              <span>Individual items ({bundleProds.map(p => p.name.split(" ")[0]).join(" + ") || "Items"}):</span>
+                              <span className="font-medium">₹{individualTotal}</span>
+                            </div>
+                            <div className="flex justify-between border-b border-black/10 pb-2 text-neutral-900">
+                              <span className="font-medium">Combo total ({currentBundle.discount_percent}% bundle discount):</span>
+                              <span className="font-bold text-sm">₹{bundleTotal}</span>
+                            </div>
+                            <div className="flex justify-between text-emerald-700 font-medium">
+                              <span>Buyer savings:</span>
+                              <span>₹{buyerSavings}</span>
+                            </div>
+                            <div className="flex justify-between text-violet-700 font-bold">
+                              <span>Merchant captured revenue:</span>
+                              <span>₹{bundleTotal}</span>
+                            </div>
+                          </div>
+
+                          <div className="bg-white p-3 rounded-xl border border-black/5 text-[11px] text-neutral-600 leading-relaxed">
+                            <strong>Revenue growth story:</strong> Selling this {bundleProds.length}-item bundle captures <span className="text-violet-700 font-semibold">+₹{incrementalRevenue}</span> incremental revenue versus selling {bundleProds[0]?.name || "the main item"} alone.
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                );
+              })()
             ) : (
-              <p className="text-xs text-neutral-500">No active bundle rule found.</p>
+              <p className="text-xs text-neutral-500">No bundle rules configured.</p>
             )}
           </div>
         </div>

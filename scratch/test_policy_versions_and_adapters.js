@@ -19,13 +19,14 @@ async function runTests() {
     }
     console.log("✅ Initial policy versions retrieved successfully.\n");
 
-    // 2. Deploy Policy Change to Create New Version (v2)
+    // 2. Deploy Policy Change to Create New Version
     console.log("2️⃣ Testing Policy Snapshot Creation (Creating next version)...");
     const updatedConfig = {
       ...data1.config,
       policy: {
         ...data1.config.policy,
-        max_autonomous_checkout_paise: 75000 // changed from 70000 to 75000 (₹750)
+        max_autonomous_checkout_paise: 400000,
+        quote_expiry_seconds: data1.config.policy.quote_expiry_seconds === 900 ? 950 : 900
       }
     };
     const res2 = await fetch(`${BASE_URL}/api/merchant/config`, {
@@ -33,7 +34,7 @@ async function runTests() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         config: updatedConfig,
-        change_summary: "Updated autonomous cap to ₹750"
+        change_summary: "Updated policy settings for autonomous drops"
       })
     });
     const data2 = await res2.json();

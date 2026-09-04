@@ -26,15 +26,10 @@ async function calculateCartTotal(items: Array<{ id: string; quantity: number }>
   }
 
   let subtotalPaise = 0;
-  let hasTee = false;
-  let hasPants = false;
 
   const itemDetails = items.map((item) => {
     const product = dbProducts.find((p) => p.id === item.id);
     if (!product) throw new Error(`Product ID ${item.id} not found in catalog`);
-    
-    if (product.category === "T-Shirts") hasTee = true;
-    if (product.category === "Pants") hasPants = true;
 
     const price = product.price;
     const itemTotal = price * item.quantity;
@@ -47,10 +42,27 @@ async function calculateCartTotal(items: Array<{ id: string; quantity: number }>
     };
   });
 
-  // Apply 15% combo discount if both Tee and Pants are in cart
+  // Dynamically evaluate active bundle rules from merchant config
+  const config = getMerchantConfig();
   let discountPaise = 0;
-  if (hasTee && hasPants) {
-    discountPaise = Math.round(subtotalPaise * 0.15);
+
+  if (config.policy.agent_can_recommend_bundles && config.bundle_rules) {
+    const activeRules = config.bundle_rules.filter((b) => b.active);
+    
+    for (const rule of activeRules) {
+      const requiredIds = rule.product_ids || [rule.product_a_id, rule.product_b_id].filter(Boolean) as string[];
+      const allPresent = requiredIds.every((reqId) => productIds.includes(reqId));
+      if (allPresent && requiredIds.length > 0) {
+        const matchingItemsTotal = itemDetails
+          .filter((it) => requiredIds.includes(it.product.id))
+          .reduce((sum, it) => sum + (it.price_paise * it.quantity), 0);
+        
+        const candidateDiscount = Math.round((matchingItemsTotal * rule.discount_percent) / 100);
+        if (candidateDiscount > discountPaise) {
+          discountPaise = candidateDiscount;
+        }
+      }
+    }
   }
 
   const finalTotalPaise = subtotalPaise - discountPaise;
@@ -75,13 +87,25 @@ async function saveOrderToDb(
   adminNotes: string = ""
 ) {
   try {
-    const ordersToInsert = pricingItems.map((item) => ({
+    const totalAmount = pricingItems.reduce((sum, it) => sum + (it.price_paise * it.quantity), 0);
+    const totalQuantity = pricingItems.reduce((sum, it) => sum + it.quantity, 0);
+    const combinedName = pricingItems.map((it) => `${it.product.name} (x${it.quantity})`).join(" + ");
+    const itemsSummary = pricingItems.map((it) => ({
+      id: it.product.id,
+      name: it.product.name,
+      quantity: it.quantity,
+      price_paise: it.price_paise,
+    }));
+
+    const fullNotes = `${adminNotes}|items_json:${JSON.stringify(itemsSummary)}`;
+
+    const orderToInsert = {
       razorpay_order_id: rzpOrderId,
-      product_id: item.product.id,
-      product_name: item.product.name,
-      product_price: item.product.price,
-      quantity: item.quantity,
-      amount: item.price_paise * item.quantity,
+      product_id: pricingItems[0].product.id,
+      product_name: combinedName,
+      product_price: pricingItems[0].product.price,
+      quantity: totalQuantity,
+      amount: totalAmount,
       customer_name: "A2A Buyer Agent",
       customer_email: "agent@zeroclick.com",
       customer_phone: "9999999999",
@@ -91,17 +115,17 @@ async function saveOrderToDb(
         state: "Maharashtra",
         pincode: "411015",
       },
-      size: item.product.sizes[0] || "L",
+      size: (Array.isArray(pricingItems[0].product?.sizes) && pricingItems[0].product.sizes.length > 0) ? pricingItems[0].product.sizes[0] : (pricingItems[0].size || "L"),
       status: status,
-      admin_notes: adminNotes,
-    }));
+      admin_notes: fullNotes,
+    };
 
-    const { error } = await supabase.from("orders").insert(ordersToInsert);
+    const { error } = await supabase.from("orders").insert([orderToInsert]);
 
     if (error) {
       console.error("❌ [DATABASE] [ORDER] Failed to insert orders:", error);
     } else {
-      console.log(`✅ [DATABASE] [ORDER] Saved ${ordersToInsert.length} order row(s) to DB.`);
+      console.log(`✅ [DATABASE] [ORDER] Saved order ${rzpOrderId} to DB.`);
     }
   } catch (err) {
     console.error("❌ [DATABASE] [ORDER] Exception during DB insert:", err);

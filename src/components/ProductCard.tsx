@@ -58,6 +58,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             <img
               src={displayImages[0]}
               alt={product.name}
+              onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/placeholder.svg'; }}
               className={`object-cover w-full h-full transform transition-all duration-700 ease-out group-hover:scale-105 ${
                 displayImages.length > 1 ? "group-hover:opacity-0 absolute inset-0" : ""
               }`}
@@ -66,6 +67,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               <img
                 src={displayImages[1]}
                 alt={`${product.name} alternate view`}
+                onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/placeholder.svg'; }}
                 className="object-cover w-full h-full transform transition-all duration-700 ease-out opacity-0 group-hover:opacity-100 group-hover:scale-105"
               />
             )}

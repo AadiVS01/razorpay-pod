@@ -111,20 +111,41 @@ export async function POST(request: NextRequest) {
     }
 
     // Restore stock for all items in the order
-    for (const item of orders) {
-      const { data: prod } = await supabase
-        .from("products")
-        .select("stock")
-        .eq("id", item.product_id)
-        .single();
-      
-      if (prod) {
-        const restoredStock = prod.stock + item.quantity;
-        await supabase
+    for (const orderRow of orders) {
+      let itemsToRestore = [{ product_id: orderRow.product_id, product_name: orderRow.product_name, quantity: orderRow.quantity }];
+      if (orderRow.admin_notes && orderRow.admin_notes.includes("items_json:")) {
+        try {
+          const match = orderRow.admin_notes.match(/items_json:(.+)$/);
+          if (match && match[1]) {
+            const parsed = JSON.parse(match[1]);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              itemsToRestore = parsed.map((it: any) => ({
+                product_id: it.id,
+                product_name: it.name,
+                quantity: it.quantity
+              }));
+            }
+          }
+        } catch (e) {
+          console.warn("Could not parse items_json from admin_notes:", e);
+        }
+      }
+
+      for (const item of itemsToRestore) {
+        const { data: prod } = await supabase
           .from("products")
-          .update({ stock: restoredStock })
-          .eq("id", item.product_id);
-        console.log(`[STATUS] Restored stock for ${item.product_name}: +${item.quantity} units. New stock: ${restoredStock}`);
+          .select("stock")
+          .eq("id", item.product_id)
+          .single();
+        
+        if (prod) {
+          const restoredStock = prod.stock + item.quantity;
+          await supabase
+            .from("products")
+            .update({ stock: restoredStock })
+            .eq("id", item.product_id);
+          console.log(`[STATUS] Restored stock for ${item.product_name}: +${item.quantity} units. New stock: ${restoredStock}`);
+        }
       }
     }
 

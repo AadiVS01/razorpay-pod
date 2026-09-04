@@ -51,14 +51,19 @@ export function transformProductForAgent(product: Product): AgentProductItem {
   const maxDiscount = override ? override.max_discount_percent : 10;
 
   let bundleOffers: BundleOffer[] = [];
-  if (config.policy.agent_can_recommend_bundles) {
+  if (config.policy.agent_can_recommend_bundles && config.bundle_rules) {
     const activeBundles = config.bundle_rules.filter(
-      b => b.active && (b.product_a_id === product.id || b.product_b_id === product.id)
+      b => b.active && (
+        (b.product_ids && b.product_ids.includes(product.id)) ||
+        b.product_a_id === product.id ||
+        b.product_b_id === product.id
+      )
     );
     bundleOffers = activeBundles.map(b => ({
-      addon_category: b.product_a_id === product.id ? "Pants" : "T-Shirts",
+      addon_category: b.name,
       discount_pct: b.discount_percent,
-      description: `Bundle with matching item for a ${b.discount_percent}% combo discount.`,
+      description: b.recommendation_reason || `Bundle as part of "${b.name}" for a ${b.discount_percent}% combo discount.`,
+      recommended_skus: b.product_ids || [b.product_a_id, b.product_b_id].filter(Boolean) as string[]
     }));
   }
 
@@ -167,37 +172,45 @@ export async function getAgentCatalog(filters?: CatalogFilterParams): Promise<Ag
       id: b.id,
       name: b.name,
       discount_percent: b.discount_percent,
-      product_a_id: b.product_a_id,
-      product_b_id: b.product_b_id,
-    })),
+      product_ids: b.product_ids || [b.product_a_id, b.product_b_id].filter(Boolean) as string[],
+      product_a_id: b.product_a_id || (b.product_ids ? b.product_ids[0] : ""),
+      product_b_id: b.product_b_id || (b.product_ids ? b.product_ids[1] : ""),
+      recommendation_reason: b.recommendation_reason || `Bundle combo for a ${b.discount_percent}% discount.`
+    }))
   };
 
   return {
     status: "success",
-    protocol_version: "a2a-v1.0",
+    version: "2026-08-20",
+    generated_at: new Date().toISOString(),
     store: {
       name: "ZeroClick",
-      tagline: "Autonomous Agent-to-Agent Print-on-Demand Store",
       currency: "INR",
-      supported_payment_rails: ["Razorpay A2A", "UPI-UAP", "Card Pre-Auth"],
-      merchant_id: "rzp_merchant_zeroclick",
+      currency_symbol: "₹",
+      total_products: agentProducts.length,
+      contact: {
+        agent_support: "agent-commerce@zeroclick.internal",
+        gateway: "Razorpay A2A Commerce Gateway"
+      }
     },
-    timestamp: new Date().toISOString(),
     merchant_capability_manifest: manifest,
-    filters_applied: {
-      category: filters?.category,
-      max_price_inr: filters?.max_price,
-      in_stock_only: filters?.in_stock,
-      query: filters?.q,
-    },
-    total_items: agentProducts.length,
     products: agentProducts,
-    agent_instructions: {
-      order_endpoint: "/api/razorpay/order",
-      quote_endpoint: "/api/agent/quote",
-      currency: "INR",
-      max_recommended_single_cart_inr: 10000,
-      notes: "Prices in price_inr are in full INR, price_paise are in 1/100 INR. Quantities subject to real-time stock reservation.",
-    },
+    autonomous_checkout: {
+      endpoint: "/api/razorpay/order",
+      method: "POST",
+      required_headers: {
+        "Content-Type": "application/json"
+      },
+      supported_protocols: ["acp-shaped", "ap2-shaped", "x402-shaped"],
+      protocol_adapter_endpoint: "/api/protocol/adapter",
+      parameters: {
+        items: "Array<{ id: string, quantity: number, price_paise?: number, size?: string, color?: string }>",
+        budget_cap_paise: "number (must be <= merchant max_autonomous_checkout_paise)",
+        expected_total_paise: "number (authoritative check matches item prices - bundle discounts)",
+        quote_id: "string (optional: cryptographic HMAC token from /api/agent/quote)",
+        idempotency_key: "string (recommended for duplicate order prevention)",
+        mandate_authorized: "boolean (true if buyer pre-consented to autonomous mandate execution)"
+      }
+    }
   };
 }

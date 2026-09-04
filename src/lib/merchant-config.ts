@@ -20,8 +20,9 @@ export interface BundleRule {
   name: string;
   discount_percent: number;
   active: boolean;
-  product_a_id: string;
-  product_b_id: string;
+  product_ids?: string[];
+  product_a_id?: string;
+  product_b_id?: string;
   recommendation_reason?: string;
 }
 
