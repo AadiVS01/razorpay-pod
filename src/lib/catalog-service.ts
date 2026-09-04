@@ -3,29 +3,69 @@ import { getAdminSupabase, supabasePublic } from "./supabase";
 import { getMerchantConfig, getActivePolicyVersion } from "./merchant-config";
 
 /**
- * Extracts all valid images from product.images and product.color_images
+ * Mapping of product slugs to exact local public assets
  */
-export function getAllProductImages(product: Product): string[] {
-  const images: string[] = [];
+export const PRODUCT_ASSET_MAP: Record<string, string> = {
+  "argentina-sun-tee": "/products/argentina-sun-tee.png",
+  "argentina-sun-of-may-tee": "/products/argentina-sun-tee.png",
+  "everyday-cargo-pants": "/products/everyday-cargo-pants.png",
+  "court-canvas-sneakers": "/products/court-canvas-sneakers.png",
+  "essential-street-cap": "/products/essential-street-cap.png",
+  "utility-crossbody-sling": "/products/utility-crossbody-sling.png",
+  "crew-socks-3-pack": "/products/crew-socks-3-pack.png",
+};
+
+/**
+ * Returns the configured base URL for asset generation
+ */
+export function getBaseUrl(): string {
+  const envUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.BASE_URL;
+  if (envUrl && envUrl.trim().length > 0) {
+    return envUrl.trim().replace(/\/+$/, "");
+  }
+  return "https://razorpay-pod.vercel.app";
+}
+
+/**
+ * Normalizes relative image path into an absolute public URL
+ */
+export function toAbsoluteImageUrl(imagePath: string, baseUrl: string = getBaseUrl()): string {
+  if (!imagePath) return "";
+  if (imagePath.startsWith("http://") || imagePath.startsWith("https://")) {
+    return imagePath;
+  }
+  const cleanPath = imagePath.startsWith("/") ? imagePath : `/${imagePath}`;
+  return `${baseUrl}${cleanPath}`;
+}
+
+/**
+ * Extracts all valid images from product.images and product.color_images as absolute URLs
+ */
+export function getAllProductImages(product: Product, baseUrl: string = getBaseUrl()): string[] {
+  const rawImages: string[] = [];
   if (product.images && product.images.length > 0) {
-    images.push(...product.images);
+    rawImages.push(...product.images);
   }
   if (product.color_images) {
     Object.values(product.color_images).forEach((list) => {
       if (Array.isArray(list)) {
         list.forEach((img) => {
-          if (img && !images.includes(img)) images.push(img);
+          if (img && !rawImages.includes(img)) rawImages.push(img);
         });
       }
     });
   }
-  return images;
+  if (rawImages.length === 0 && PRODUCT_ASSET_MAP[product.slug]) {
+    rawImages.push(PRODUCT_ASSET_MAP[product.slug]);
+  }
+  return rawImages.map(img => toAbsoluteImageUrl(img, baseUrl));
 }
 
 /**
  * Transforms raw DB product row to machine-optimized AgentProductItem
  */
 export function transformProductForAgent(product: Product): AgentProductItem {
+  const baseUrl = getBaseUrl();
   const priceInr = Math.round(product.price / 100);
   const comparePriceInr = product.compare_price ? Math.round(product.compare_price / 100) : null;
   const discountPct = comparePriceInr && comparePriceInr > priceInr
@@ -37,7 +77,21 @@ export function transformProductForAgent(product: Product): AgentProductItem {
   const slugShort = product.slug.replace(/-/g, "").substring(0, 4).toUpperCase();
   const sku = `SKU-${categoryPrefix}-${slugShort}`;
 
-  const resolvedImages = getAllProductImages(product);
+  const resolvedImages = getAllProductImages(product, baseUrl);
+  const fallbackAsset = PRODUCT_ASSET_MAP[product.slug] || "/products/argentina-sun-tee.png";
+  const primaryImageUrl = resolvedImages.length > 0
+    ? resolvedImages[0]
+    : toAbsoluteImageUrl(fallbackAsset, baseUrl);
+  const finalImages = resolvedImages.length > 0 ? resolvedImages : [primaryImageUrl];
+
+  let resolvedColorImages: Record<string, string[]> | undefined = undefined;
+  if (product.color_images) {
+    resolvedColorImages = {};
+    for (const [color, imgs] of Object.entries(product.color_images)) {
+      resolvedColorImages[color] = imgs.map((img) => toAbsoluteImageUrl(img, baseUrl));
+    }
+  }
+
   const colors = product.colors || (product.color_images ? Object.keys(product.color_images) : []);
 
   const displayStock = product.stock;
@@ -101,8 +155,9 @@ export function transformProductForAgent(product: Product): AgentProductItem {
     colors: colors,
     stock: displayStock,
     in_stock: product.stock > 0,
-    images: resolvedImages,
-    color_images: product.color_images,
+    image_url: primaryImageUrl,
+    images: finalImages,
+    color_images: resolvedColorImages,
     ai_summary: aiSummary,
     bundle_offers: bundleOffers,
     negotiable: isNegotiable,

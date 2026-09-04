@@ -48,7 +48,8 @@ export async function GET(request: Request) {
                             stock: { type: "integer" },
                             sizes: { type: "array", items: { type: "string" } },
                             colors: { type: "array", items: { type: "string" } },
-                            images: { type: "array", items: { type: "string" } },
+                            image_url: { type: "string", format: "uri", description: "Absolute public HTTPS URL to authoritative product asset" },
+                            images: { type: "array", items: { type: "string", format: "uri" }, description: "Array of absolute public HTTPS asset URLs" },
                             ai_summary: { type: "string" },
                             negotiable: { type: "boolean" },
                             negotiation_policy: {

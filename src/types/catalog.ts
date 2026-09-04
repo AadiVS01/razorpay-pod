@@ -37,6 +37,7 @@ export interface AgentProductItem {
   colors: string[];
   stock: number;
   in_stock: boolean;
+  image_url: string;
   images: string[];
   color_images?: Record<string, string[]>;
   ai_summary: string;
