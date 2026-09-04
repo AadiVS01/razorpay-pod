@@ -50,7 +50,8 @@ import {
   MerchantPolicy,
   BundleRule,
   ProductOverride,
-  PolicyVersionSnapshot
+  PolicyVersionSnapshot,
+  PolicyPerformanceMetrics
 } from "@/types/merchant";
 import { GrowthRule, GrowthRuleType, BuyerEligibilityType, DEFAULT_GROWTH_RULES } from "@/lib/growth-engine";
 import { AgentJourney, AuditEvent } from "@/lib/audit-ledger";
@@ -111,6 +112,8 @@ export const MerchantControlCenter: React.FC = () => {
   // Modals & Drawers
   const [selectedTrace, setSelectedTrace] = useState<AgentJourney["trace"] | null>(null);
   const [selectedSnapshot, setSelectedSnapshot] = useState<PolicyVersionSnapshot | null>(null);
+  const [snapshotPerformance, setSnapshotPerformance] = useState<PolicyPerformanceMetrics | null>(null);
+  const [loadingSnapshotPerf, setLoadingSnapshotPerf] = useState(false);
   const [showPublishDiff, setShowPublishDiff] = useState(false);
   const [showNewRuleModal, setShowNewRuleModal] = useState(false);
   const [customSummaryNote, setCustomSummaryNote] = useState("");
@@ -206,6 +209,25 @@ export const MerchantControlCenter: React.FC = () => {
   useEffect(() => {
     loadConfigAndProducts();
   }, []);
+
+  useEffect(() => {
+    if (selectedSnapshot) {
+      setLoadingSnapshotPerf(true);
+      fetch(`/api/merchant/policy/${selectedSnapshot.version}/performance`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.status === "success" && data.performance) {
+            setSnapshotPerformance(data.performance);
+          } else {
+            setSnapshotPerformance(null);
+          }
+        })
+        .catch(() => setSnapshotPerformance(null))
+        .finally(() => setLoadingSnapshotPerf(false));
+    } else {
+      setSnapshotPerformance(null);
+    }
+  }, [selectedSnapshot]);
 
   const handleUpdatePolicy = (field: keyof MerchantPolicy, value: any) => {
     if (!config) return;
@@ -1596,53 +1618,173 @@ export const MerchantControlCenter: React.FC = () => {
         </div>
       )}
 
-      {/* ================= MODAL: VIEW POLICY SNAPSHOT ================= */}
+      {/* ================= MODAL: VIEW POLICY SNAPSHOT & PERFORMANCE ================= */}
       {selectedSnapshot && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-black/10 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-xl animate-scale-up">
+          <div className="bg-white border border-black/10 rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto animate-scale-up">
             <div className="flex items-center justify-between pb-3 border-b border-black/10">
-              <div>
-                <h3 className="text-base font-semibold text-neutral-900">Policy Snapshot {selectedSnapshot.version}</h3>
-                <p className="text-xs text-neutral-500">Created on {new Date(selectedSnapshot.created_at).toLocaleString()}</p>
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-violet-50 text-violet-700 rounded-xl border border-violet-200">
+                  <Shield className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <h3 className="text-base font-bold text-neutral-900">Policy Snapshot {selectedSnapshot.version}</h3>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                      selectedSnapshot.status === "active"
+                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        : "bg-neutral-100 text-neutral-600"
+                    }`}>
+                      {selectedSnapshot.status === "active" ? "Active Policy" : "Superseded"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-neutral-500">Created on {new Date(selectedSnapshot.created_at).toLocaleString()}</p>
+                </div>
               </div>
               <button
                 onClick={() => setSelectedSnapshot(null)}
-                className="p-1 rounded-lg hover:bg-neutral-100 text-neutral-500"
+                className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-500"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
-              <div className="p-3 bg-neutral-50 rounded-xl border border-black/5">
-                <span className="text-[11px] font-semibold text-neutral-500 uppercase block mb-1">Change Summary</span>
-                <p className="font-medium text-neutral-900">{selectedSnapshot.change_summary}</p>
+            <div className="space-y-5 text-xs">
+              {/* Section 1: Immutable Configuration */}
+              <div className="space-y-2">
+                <span className="text-[11px] font-bold text-neutral-500 uppercase tracking-wider block">
+                  1. Immutable Policy Configuration
+                </span>
+                <div className="p-3.5 bg-neutral-50/80 rounded-xl border border-black/5 space-y-2.5">
+                  <div className="text-[11px] text-neutral-600">
+                    <strong className="text-neutral-900">Summary:</strong> {selectedSnapshot.change_summary}
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-1 border-t border-black/5">
+                    <div>
+                      <span className="text-neutral-500 block text-[10px]">Autonomous Cap</span>
+                      <strong className="text-neutral-900 font-bold">₹{(selectedSnapshot.policy.max_autonomous_checkout_paise / 100).toLocaleString()}</strong>
+                    </div>
+                    <div>
+                      <span className="text-neutral-500 block text-[10px]">Quote TTL Window</span>
+                      <strong className="text-neutral-900 font-bold">{selectedSnapshot.policy.quote_expiry_seconds}s</strong>
+                    </div>
+                    <div>
+                      <span className="text-neutral-500 block text-[10px]">UPI Mandate</span>
+                      <strong className="text-neutral-900 font-bold">{selectedSnapshot.policy.mandate_required ? "Required" : "Optional"}</strong>
+                    </div>
+                    <div>
+                      <span className="text-neutral-500 block text-[10px]">Margin Floor</span>
+                      <strong className="text-neutral-900 font-bold">{selectedSnapshot.policy.margin_floor_percent ?? 60}%</strong>
+                    </div>
+                    <div>
+                      <span className="text-neutral-500 block text-[10px]">Global Max Discount</span>
+                      <strong className="text-neutral-900 font-bold">{selectedSnapshot.policy.max_discount_percent ?? 25}%</strong>
+                    </div>
+                    <div>
+                      <span className="text-neutral-500 block text-[10px]">Active Growth Rules</span>
+                      <strong className="text-neutral-900 font-bold">{selectedSnapshot.growth_rules?.length || 0} Rules</strong>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <div className="p-3 bg-neutral-50 rounded-xl border border-black/5 space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-neutral-500">Autonomous budget cap:</span>
-                  <span className="font-semibold text-neutral-900">₹{selectedSnapshot.policy.max_autonomous_checkout_paise / 100}</span>
+              {/* Section 2: Performance under this policy */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-neutral-500 uppercase tracking-wider block">
+                    2. Performance under this policy
+                  </span>
+                  {snapshotPerformance && (snapshotPerformance.first_activity_at || snapshotPerformance.last_activity_at) && (
+                    <span className="text-[10px] text-neutral-400 font-mono">
+                      Active: {snapshotPerformance.first_activity_at ? new Date(snapshotPerformance.first_activity_at).toLocaleDateString() : ""}
+                      {snapshotPerformance.last_activity_at ? ` → ${new Date(snapshotPerformance.last_activity_at).toLocaleDateString()}` : ""}
+                    </span>
+                  )}
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-neutral-500">Quote expiration TTL:</span>
-                  <span className="font-semibold text-neutral-900">{selectedSnapshot.policy.quote_expiry_seconds}s</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-neutral-500">Require UPI Mandate:</span>
-                  <span className="font-semibold text-neutral-900">{selectedSnapshot.policy.mandate_required ? "Yes" : "No"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-neutral-500">Growth Rules Snapshot:</span>
-                  <span className="font-semibold text-neutral-900">{selectedSnapshot.growth_rules?.length || 0} rules</span>
-                </div>
+
+                {loadingSnapshotPerf ? (
+                  <div className="p-8 border border-black/5 bg-neutral-50 rounded-xl flex items-center justify-center space-x-2 text-neutral-500">
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Calculating derived performance metrics...</span>
+                  </div>
+                ) : snapshotPerformance && (snapshotPerformance.orders_completed > 0 || snapshotPerformance.quotes_issued > 0 || snapshotPerformance.blocked_attempts > 0) ? (
+                  <div className="space-y-3">
+                    {/* Metrics Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      <div className="p-3 bg-white border border-black/10 rounded-xl space-y-0.5">
+                        <span className="text-[10px] font-medium text-neutral-500 block">Revenue Captured</span>
+                        <p className="text-base font-bold text-neutral-900">₹{(snapshotPerformance.revenue_captured_paise / 100).toLocaleString()}</p>
+                        <span className="text-[10px] text-neutral-400">{snapshotPerformance.orders_completed} orders completed</span>
+                      </div>
+
+                      <div className="p-3 bg-white border border-black/10 rounded-xl space-y-0.5">
+                        <span className="text-[10px] font-medium text-neutral-500 block">Avg Order Value</span>
+                        <p className="text-base font-bold text-neutral-900">₹{Math.round(snapshotPerformance.average_order_value_paise / 100).toLocaleString()}</p>
+                        <span className="text-[10px] text-neutral-400">Per settled cart</span>
+                      </div>
+
+                      <div className="p-3 bg-white border border-black/10 rounded-xl space-y-0.5">
+                        <span className="text-[10px] font-medium text-neutral-500 block">Incremental Revenue</span>
+                        <p className="text-base font-bold text-violet-700">₹{(snapshotPerformance.incremental_revenue_paise / 100).toLocaleString()}</p>
+                        <span className="text-[10px] text-neutral-400">From bundles & cross-sells</span>
+                      </div>
+
+                      <div className="p-3 bg-white border border-black/10 rounded-xl space-y-0.5">
+                        <span className="text-[10px] font-medium text-neutral-500 block">Buyer Savings</span>
+                        <p className="text-base font-bold text-emerald-700">₹{(snapshotPerformance.buyer_savings_paise / 100).toLocaleString()}</p>
+                        <span className="text-[10px] text-neutral-400">Delivered to buyers</span>
+                      </div>
+
+                      <div className="p-3 bg-white border border-black/10 rounded-xl space-y-0.5">
+                        <span className="text-[10px] font-medium text-neutral-500 block">Quotes Issued</span>
+                        <p className="text-base font-bold text-neutral-900">{snapshotPerformance.quotes_issued}</p>
+                        <span className="text-[10px] text-neutral-400">
+                          {snapshotPerformance.quote_success_rate_percent !== null ? `${snapshotPerformance.quote_success_rate_percent}% success rate` : "—"}
+                        </span>
+                      </div>
+
+                      <div className="p-3 bg-white border border-black/10 rounded-xl space-y-0.5">
+                        <span className="text-[10px] font-medium text-neutral-500 block">Growth Conversion</span>
+                        <p className="text-base font-bold text-orange-600">
+                          {snapshotPerformance.growth_conversion_rate_percent !== null ? `${snapshotPerformance.growth_conversion_rate_percent}%` : "—"}
+                        </p>
+                        <span className="text-[10px] text-neutral-400">Adopted incentive deals</span>
+                      </div>
+
+                      <div className="p-3 bg-white border border-black/10 rounded-xl space-y-0.5">
+                        <span className="text-[10px] font-medium text-neutral-500 block">Blocked Attempts</span>
+                        <p className="text-base font-bold text-rose-600">{snapshotPerformance.blocked_attempts}</p>
+                        <span className="text-[10px] text-neutral-400">Protected by gates</span>
+                      </div>
+
+                      <div className="p-3 bg-white border border-black/10 rounded-xl space-y-0.5">
+                        <span className="text-[10px] font-medium text-neutral-500 block">Payment Recovery</span>
+                        <p className="text-base font-bold text-teal-600">{snapshotPerformance.payment_recoveries}</p>
+                        <span className="text-[10px] text-neutral-400">
+                          {snapshotPerformance.recovery_rate_percent !== null ? `${snapshotPerformance.recovery_rate_percent}% rate` : "Recovered sessions"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="text-[11px] text-neutral-500 italic">
+                      Metrics are derived from quotes, orders, payments, and Trust Ledger events that reference this policy version.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-4 bg-neutral-50 border border-black/5 rounded-xl text-center space-y-1">
+                    <p className="text-xs font-semibold text-neutral-700">No activity recorded under this policy version yet.</p>
+                    <p className="text-[11px] text-neutral-500">
+                      Metrics are derived from quotes, orders, payments, and Trust Ledger events that reference this policy version.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="pt-2 flex justify-end">
               <button
                 onClick={() => setSelectedSnapshot(null)}
-                className="px-4 py-2 border border-black/10 rounded-xl text-xs font-medium text-neutral-700 hover:bg-neutral-100"
+                className="px-4 py-2 border border-black/10 rounded-xl text-xs font-semibold text-neutral-700 hover:bg-neutral-100 transition-colors"
               >
                 Close
               </button>

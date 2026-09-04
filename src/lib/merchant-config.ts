@@ -475,3 +475,132 @@ export function rollbackToVersion(targetVersionId: string): PolicyVersionSnapsho
 
   return saveMerchantConfig(restoredConfig, `Rollback to policy snapshot ${targetVersionId}`);
 }
+
+/**
+ * Derives business performance metrics attributable to activity under a specific policy version
+ */
+export function getPolicyPerformance(versionTag: string) {
+  ensureFilesExist();
+  const versions = getPolicyVersions();
+  const snapshot = versions.find(v => v.version.toLowerCase() === versionTag.toLowerCase());
+  if (!snapshot) {
+    return null;
+  }
+
+  let events: any[] = [];
+  try {
+    if (fs.existsSync(ledgerPath)) {
+      const data = fs.readFileSync(ledgerPath, "utf-8");
+      events = JSON.parse(data);
+    }
+  } catch (err) {
+    console.warn("⚠️ [POLICY_PERFORMANCE] Failed to read ledger:", err);
+  }
+
+  const versionEvents = events.filter(e => (e.policy_version || "v1").toLowerCase() === versionTag.toLowerCase());
+
+  let ordersCompleted = 0;
+  let revenueCapturedPaise = 0;
+  let quotesIssued = 0;
+  let buyerSavingsPaise = 0;
+  let incrementalRevenuePaise = 0;
+  let growthOrdersCount = 0;
+  let blockedAttempts = 0;
+  let paymentRecoveries = 0;
+  let paymentFailures = 0;
+  let firstActivityAt: string | null = null;
+  let lastActivityAt: string | null = null;
+
+  if (versionEvents.length > 0) {
+    const sorted = [...versionEvents].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    firstActivityAt = sorted[0].timestamp;
+    lastActivityAt = sorted[sorted.length - 1].timestamp;
+  }
+
+  for (const event of versionEvents) {
+    if (event.action === "QUOTE_ISSUED" && event.policy_result === "ALLOWED") {
+      quotesIssued++;
+    }
+
+    if (event.action === "ORDER_CREATED" || event.action === "PAYMENT_CAPTURED") {
+      if (event.policy_result === "ALLOWED" && event.outcome === "COMPLETED") {
+        ordersCompleted++;
+        const finalPaise = (event.amount_after !== null && event.amount_after !== undefined)
+          ? event.amount_after * 100
+          : (event.amount_before ? event.amount_before * 100 : 0);
+        revenueCapturedPaise += finalPaise;
+
+        if (event.arithmetic) {
+          buyerSavingsPaise += (event.arithmetic.buyer_savings || 0) * 100;
+          if (event.arithmetic.incremental_revenue && event.arithmetic.incremental_revenue > 0) {
+            incrementalRevenuePaise += event.arithmetic.incremental_revenue * 100;
+            growthOrdersCount++;
+          }
+        } else if (event.amount_before && event.amount_after) {
+          const savings = Math.max(0, event.amount_before - event.amount_after) * 100;
+          buyerSavingsPaise += savings;
+          if (savings > 0) growthOrdersCount++;
+        }
+
+        if (event.matched_rules && event.matched_rules.length > 0) {
+          growthOrdersCount++;
+        }
+
+        if (
+          event.details?.toLowerCase().includes("recovery") ||
+          event.intent_summary?.toLowerCase().includes("recovery")
+        ) {
+          paymentRecoveries++;
+        }
+      }
+    }
+
+    if (
+      event.action === "CHECKOUT_BLOCKED" ||
+      event.policy_result === "BLOCKED" ||
+      event.policy_result === "REJECTED"
+    ) {
+      blockedAttempts++;
+    }
+
+    if (event.action === "PAYMENT_FAILED") {
+      paymentFailures++;
+    }
+  }
+
+  const avgOrderValuePaise = ordersCompleted > 0 ? Math.round(revenueCapturedPaise / ordersCompleted) : 0;
+  const quoteSuccessRate = quotesIssued > 0 ? Math.min(100, Math.round((ordersCompleted / quotesIssued) * 100)) : null;
+  const growthConversionRate = ordersCompleted > 0 ? Math.min(100, Math.round((growthOrdersCount / ordersCompleted) * 100)) : null;
+  const recoveryRate = (paymentFailures > 0 || paymentRecoveries > 0)
+    ? Math.min(100, Math.round((paymentRecoveries / Math.max(1, paymentFailures + paymentRecoveries)) * 100))
+    : null;
+
+  return {
+    policy_version: snapshot.version,
+    version_status: snapshot.status,
+    configuration: {
+      autonomous_cap_paise: snapshot.policy.max_autonomous_checkout_paise,
+      max_discount_percent: snapshot.policy.max_discount_percent ?? 25,
+      margin_floor_percent: snapshot.policy.margin_floor_percent ?? 60,
+      quote_expiry_seconds: snapshot.policy.quote_expiry_seconds,
+      mandate_required: snapshot.policy.mandate_required,
+      growth_rule_count: snapshot.growth_rules?.length ?? snapshot.bundle_rules?.length ?? 0
+    },
+    performance: {
+      orders_completed: ordersCompleted,
+      revenue_captured_paise: revenueCapturedPaise,
+      average_order_value_paise: avgOrderValuePaise,
+      quotes_issued: quotesIssued,
+      quote_success_rate_percent: quoteSuccessRate,
+      growth_conversion_rate_percent: growthConversionRate,
+      incremental_revenue_paise: incrementalRevenuePaise,
+      buyer_savings_paise: buyerSavingsPaise,
+      blocked_attempts: blockedAttempts,
+      payment_recoveries: paymentRecoveries,
+      recovery_rate_percent: recoveryRate,
+      first_activity_at: firstActivityAt,
+      last_activity_at: lastActivityAt
+    }
+  };
+}
+

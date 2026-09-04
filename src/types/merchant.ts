@@ -54,3 +54,34 @@ export interface PolicyVersionSnapshot {
   bundle_rules: BundleRule[];
   growth_rules?: GrowthRule[];
 }
+
+export interface PolicyPerformanceMetrics {
+  orders_completed: number;
+  revenue_captured_paise: number;
+  average_order_value_paise: number;
+  quotes_issued: number;
+  quote_success_rate_percent: number | null;
+  growth_conversion_rate_percent: number | null;
+  incremental_revenue_paise: number;
+  buyer_savings_paise: number;
+  blocked_attempts: number;
+  payment_recoveries: number;
+  recovery_rate_percent: number | null;
+  first_activity_at: string | null;
+  last_activity_at: string | null;
+}
+
+export interface PolicyVersionDetailResponse {
+  status: "success";
+  policy_version: string;
+  version_status: "active" | "superseded";
+  configuration: {
+    autonomous_cap_paise: number;
+    max_discount_percent: number;
+    margin_floor_percent: number;
+    quote_expiry_seconds: number;
+    mandate_required: boolean;
+    growth_rule_count: number;
+  };
+  performance: PolicyPerformanceMetrics;
+}

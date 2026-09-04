@@ -343,13 +343,18 @@ export async function POST(request: NextRequest) {
       logAuditEvent({
         actor: "AI Buyer Agent",
         action: "CHECKOUT_BLOCKED",
+        session_id,
+        cart_id,
         quote_id: quote_id || null,
         order_id: null,
+        policy_version: currentPolicyVersion || activeVersion,
         amount_before: expected_total_paise / 100,
         amount_after: null,
         policy_result: "BLOCKED",
         reason_code: "PRICE_MISMATCH",
-        outcome: "FAILED"
+        outcome: "FAILED",
+        details: `Requested total (${expected_total_paise} paise) does not match merchant calculated total (${checkTotal} paise). Prompt injection blocked.`,
+        gate_results: { "Autonomy Gate": "PASS", "Mandate Bound": "PASS", "Quote Scope Match": "FAIL" }
       });
 
       return NextResponse.json(
@@ -372,13 +377,18 @@ export async function POST(request: NextRequest) {
       logAuditEvent({
         actor: "AI Buyer Agent",
         action: "CHECKOUT_BLOCKED",
+        session_id,
+        cart_id,
         quote_id: quote_id || null,
         order_id: null,
+        policy_version: currentPolicyVersion || activeVersion,
         amount_before: pricing.total_paise / 100,
         amount_after: null,
         policy_result: "BLOCKED",
         reason_code: "BUDGET_EXCEEDED",
-        outcome: "FAILED"
+        outcome: "FAILED",
+        details: `Order total of ₹${(pricing.total_paise / 100).toFixed(2)} exceeds the merchant pre-configured budget cap limit of ₹${(maxCheckoutCap / 100).toFixed(2)}.`,
+        gate_results: { "Autonomy Gate": "PASS", "Mandate Bound": "PASS", "Budget Cap Gate": "FAIL" }
       });
 
       return NextResponse.json(
