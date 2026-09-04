@@ -909,6 +909,22 @@ export const MerchantControlCenter: React.FC = () => {
                     </div>
                   );
                 })()}
+
+                {/* Save & Publish Action Bar */}
+                <div className="col-span-1 lg:col-span-2 pt-4 border-t border-black/10 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center space-x-2 text-xs text-neutral-500">
+                    <Sliders className="w-4 h-4 text-neutral-400" />
+                    <span>Edits update live in memory. Click Save & Publish to record an immutable version snapshot.</span>
+                  </div>
+                  <button
+                    onClick={() => setShowPublishDiff(true)}
+                    disabled={saving}
+                    className="flex items-center space-x-2 bg-neutral-900 text-white px-5 py-2.5 rounded-xl font-semibold text-xs hover:bg-neutral-800 transition-all shadow-sm active:scale-[0.98] disabled:opacity-50"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Save & Publish Changes</span>
+                  </button>
+                </div>
               </div>
             ) : null}
           </div>
@@ -1089,6 +1105,22 @@ export const MerchantControlCenter: React.FC = () => {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Quick Publish Banner for Policy */}
+          <div className="bg-neutral-900 text-white rounded-2xl p-4 sm:p-5 flex flex-wrap items-center justify-between gap-4 shadow-sm">
+            <div className="space-y-0.5">
+              <span className="font-semibold text-xs block">Ready to deploy policy changes?</span>
+              <p className="text-[11px] text-neutral-300">Publishing creates an immutable version snapshot and propagates bounds to all active agents.</p>
+            </div>
+            <button
+              onClick={() => setShowPublishDiff(true)}
+              disabled={saving}
+              className="px-4 py-2 bg-white text-neutral-900 rounded-xl text-xs font-semibold hover:bg-neutral-100 transition-all shadow-sm flex items-center space-x-1.5"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>Save & Publish Policy</span>
+            </button>
           </div>
 
           {/* 3. Immutable Policy Version History */}
