@@ -5,13 +5,13 @@
 [![Supabase](https://img.shields.io/badge/Database-Supabase-emerald?style=flat&logo=supabase)](https://supabase.com/)
 [![Razorpay](https://img.shields.io/badge/Payments-Razorpay%20A2A-blue?style=flat&logo=razorpay)](https://razorpay.com/)
 
-**ZeroClick** is a production-hardened **Merchant Revenue Control Plane & Growth Engine** for autonomous AI-buyer commerce. It enables merchants to configure products, dynamic growth rules (bundles, volume discounts, buy-X-get-Y, recovery offers), discount limits, mandate requirements, quote expiry TTLs, and spending caps. AI buyer agents discover catalog drops, negotiate within deterministic boundaries, and execute end-to-end checkout with zero human holds or approval queues.
+**ZeroClick** is a production-hardened **Merchant Revenue Control Plane & Gateway** for autonomous AI-to-AI (A2A) commerce. It allows merchants to set growth rules, discount ceilings, and spending boundaries while AI buyer agents discover products, negotiate within approved bounds, and complete purchases on Razorpay rails—with **zero human approval queues or checkout holds**.
 
-Every transaction is governed by **8 server-side security gates**, logged into an immutable **Trust Ledger**, and auditable via explainable **"Why this decision?"** traces.
+Every transaction is governed by deterministic server-side safety gates, recorded into an immutable Trust Ledger, and auditable via explainable **"Why this decision?"** traces.
 
 ---
 
-## 🏗️ System Architecture
+## 📖 The ZeroClick Architecture Story
 
 ```mermaid
 sequenceDiagram
@@ -23,110 +23,98 @@ sequenceDiagram
     participant DB as "🗄️ Supabase DB"
     participant RZP as "💳 Razorpay Payments"
 
-    Customer->>Buyer: "Buy Complete Outfit (Tee + Cargo Pants) under ₹1,800"
-    Buyer->>Gateway: Discovery Query (GET /api/agent/catalog)
-    Gateway-->>Buyer: Products + Active Growth Rules + Capability Manifest
-    Buyer->>Gateway: Negotiate Price (POST /api/agent/quote)
-    Gateway->>Engine: Evaluate Discount Bounds & Policy Version
-    Engine-->>Gateway: Quote Token Signed (HMAC-SHA256 bound to Cart + TTL)
+    Customer->>Buyer: "Buy Complete Outfit under ₹1,800"
+    Buyer->>Gateway: 1. Discover Catalog & Growth Rules (GET /api/agent/catalog)
+    Gateway-->>Buyer: Products + Active Growth Rules + Policy Manifest
+    Buyer->>Gateway: 2. Request Signed Quote / Negotiate (POST /api/agent/quote)
+    Gateway->>Engine: Validate Policy Version & Margin Floor
+    Engine-->>Gateway: HMAC-SHA256 Signed Quote Token (Bound to Cart + TTL)
     Gateway-->>Buyer: Approved Quote Token + Policy Snapshot
-    Buyer->>Gateway: Autonomous Checkout (POST /api/razorpay/order)
-    Gateway->>Engine: Run 8 Server-Side Safety Gates
+    Buyer->>Gateway: 3. Autonomous Checkout with Mandate (POST /api/razorpay/order)
+    Gateway->>Engine: Run 8 Server-Side Deterministic Gates
     alt All 8 Gates Pass
         Gateway->>DB: Atomic Conditional Stock Decrement (gte stock, qty)
-        Gateway->>RZP: Issue Razorpay Order / Pre-Auth Payment
-        Gateway->>DB: Log Idempotency Key & Order Row
-        Gateway-->>Buyer: Order Success (Exact Signed Quote Match, ₹0 Hidden Fees)
-        Buyer-->>Customer: "Complete Outfit secured! Order confirmed."
-    else Policy / Budget / Stock Violation
-        Gateway-->>Buyer: Deterministic Error (e.g. BUDGET_CAP_EXCEEDED, INVENTORY_STOCK_OUT)
-        Buyer-->>Customer: "Checkout rejected by merchant revenue policy."
+        Gateway->>RZP: Create Razorpay Order / Pre-Auth Payment
+        Gateway->>DB: Record Idempotency Key & Ledger Event
+        Gateway-->>Buyer: 200 OK — Order Settled (₹0 Hidden Fees)
+        Buyer-->>Customer: "Order confirmed automatically!"
+    else Policy, Budget, Stock, or Scope Violation
+        Gateway-->>Buyer: Deterministic Error (e.g. BUDGET_CAP_EXCEEDED, PRICE_MISMATCH)
+        Buyer-->>Customer: "Purchase blocked by merchant safety rails."
     end
 ```
 
 ---
 
-## 🛡️ The 8 Deterministic Server-Side Safety Gates
+## 🧩 How the System Works
 
-| # | Security Gate | Mechanism & Threat Neutralization | Error Code |
+### 1. What the AI Buyer Agent Does
+* **Autonomous Discovery:** Queries machine-readable endpoints (`/api/agent/catalog`, `/api/openapi.json`) to find products, live inventory, variants, and active growth incentives.
+* **Bounded Negotiation:** Solicits programmatic bids for volume purchases or custom bundles via `/api/agent/quote`.
+* **Zero-Click Execution:** Submits pre-authorized orders with UPI AutoPay / e-mandate consent tokens to `/api/razorpay/order` without requiring merchant approval holds.
+
+### 2. What the Merchant Controls
+Merchants govern autonomous transactions through the **Merchant Control Center**:
+* **Growth Rules:** Configures 10 deterministic growth incentives (Bundles, Volume Tiers, Buy-X-Get-Y, Cross-Sells, First-Time Welcome Deals, Repeat Buyer VIP Privileges, Cart Thresholds, and Payment Recovery).
+* **Hard Safety Bounds:** Sets global autonomous spending caps (e.g., ₹4,000 max), margin floor guardrails (e.g., 60% minimum margin), quote expiration TTLs (e.g., 900s), and mandate requirements.
+* **Immutable Versioning:** Every policy edit generates a permanent version snapshot (`v1`, `v2`, ...). Old quotes remain valid under their issued version until expiry, and rollback creates new snapshots without rewriting history.
+
+### 3. What the Deterministic Gateway Enforces
+The AI is never trusted for pricing, discounts, or stock math. The server deterministically enforces **8 Security Gates** before order creation:
+
+| # | Security Gate | What It Enforces | Error Code |
 |---|---|---|---|
-| **1** | **Autonomy Permission Gate** | Global merchant master switch controlling autonomous checkout permissions. | `AUTONOMY_DISABLED` |
-| **2** | **Mandate Consent Gate** | Enforces consent-based UPI Mandate / Reserve Pay pre-authorization. | `MANDATE_REQUIRED` |
-| **3** | **HMAC Quote Signature & TTL** | Cryptographically verifies quote token signature and enforces expiry TTL (default: 900s). | `PRICE_MISMATCH` |
-| **4** | **Quote Scope Matching** | Binds product ID, quantity, size variant, and cart hash. Rejects scope tampering. | `QUOTE_SCOPE_MISMATCH` |
-| **5** | **Price & Growth Rule Integrity** | Authoritative database recalculation of subtotal and active growth/combo discounts. | `PRICE_MISMATCH` |
-| **6** | **Autonomous Budget Cap** | Rejects any order exceeding the merchant's configured spending cap limit. | `BUDGET_CAP_EXCEEDED` |
-| **7** | **Atomic Inventory Allocation** | Concurrency-safe conditional SQL update (`gte("stock", qty)`). Prevents double-selling. | `INVENTORY_STOCK_OUT` |
-| **8** | **Idempotency & Recovery** | Unique idempotency key constraint ensures repeat requests return original orders; exactly-once stock restoration on failure. | `IDEMPOTENT_REUSE` |
+| **1** | **Autonomy Permission** | Master merchant switch controlling autonomous checkout privileges. | `AUTONOMY_DISABLED` |
+| **2** | **Mandate Consent** | Validates pre-authorized customer e-mandate / UPI consent token. | `MANDATE_REQUIRED` |
+| **3** | **HMAC Quote Signature & TTL** | Verifies cryptographic HMAC-SHA256 signature and quote validity window. | `PRICE_MISMATCH` |
+| **4** | **Quote Scope Binding** | Ensures product ID, quantity, size variant, and cart ID match the quote exactly. | `QUOTE_SCOPE_MISMATCH` |
+| **5** | **Price & Rule Integrity** | Recalculates discounts server-side using authoritative database prices. | `PRICE_MISMATCH` |
+| **6** | **Autonomous Budget Cap** | Rejects orders exceeding the configured merchant spending cap. | `BUDGET_CAP_EXCEEDED` |
+| **7** | **Atomic Inventory Allocation** | Conditional SQL update (`gte("stock", qty)`) prevents race conditions & overselling. | `INVENTORY_STOCK_OUT` |
+| **8** | **Idempotency & Recovery** | Unique idempotency key constraint returns existing orders on repeat requests. | `IDEMPOTENT_REUSE` |
+
+### 4. How Personalization & Growth Incentives Work
+ZeroClick applies personalized growth incentives deterministically using buyer identity tokens:
+* **First-Time Buyers (`is_new_buyer: true`):** Automatically unlocks welcome incentives (e.g., 5% off up to ₹100 cap).
+* **VIP / Returning Buyers (`completed_orders_count >= 2`):** Applies loyalty privileges without manual coupon codes.
+* **Payment Glitch Recovery (`has_failed_payment: true`):** Grants an automated recovery discount when retrying failed sessions.
+* **Margin Floor Protection:** Stacking rules evaluate all candidate deals and enforce merchant profitability floors so combined discounts never breach safe margins.
+
+### 5. How the System Fails Safely
+* **No Silent Overcharges:** Any discrepancy between requested total and authoritative server calculation fails with `PRICE_MISMATCH`.
+* **Zero Inventory Leaks:** If a payment gateway call fails downstream, inventory decrements are rolled back atomically.
+* **Explainable Rejections:** Every blocked transaction emits an audit event with exact arithmetic and business reason codes in the **Activity & Ledger** trace drawer.
 
 ---
 
 ## 🎛️ Merchant Control Center Workspace
 
-The dashboard is organized into four clean merchant areas:
+The dashboard is structured into four primary merchant areas:
 
-1. **Overview & Telemetry**: High-level store metrics, settled revenue, average order value, buyer savings delivered, growth conversion rate, payment recovery rate, and authoritative Supabase catalog inventory.
-2. **Growth Rules**: Configuration of 10 deterministic revenue growth incentives:
-   - **Bundle Discounts** (multi-product outfit & kit deals)
-   - **Buy X Get Y** (e.g., Buy 3 Get 1 Free)
-   - **Tiered Quantity Discounts** (volume tier discounts)
-   - **Cross-Sell & Upsell** (complementary accessory incentives)
-   - **Welcome Offers** (first-time buyer privileges)
-   - **Returning Buyer Privileges** (repeat customer loyalty deals)
-   - **Cart Threshold Offers** (cart total incentives)
-   - **Payment Recovery Offers** (automatic discount on retry after payment failure)
-   - **Reorder Replenishment** (recurring purchase incentives)
-3. **Agent Policy & Versioning**: Immutable policy version history (`v1`, `v2`, ...), quote expiry TTL settings, budget caps, margin floor enforcement, and instant rollback. Includes secondary **Developer Evidence & Protocol Manifest** drawer.
-4. **Activity & Trust Ledger**: Chronological journey grouping (`session_id`, `cart_id`, `quote_id`, `order_id`) with explainable **"Why this decision?"** trace drawers displaying buyer intent, exact arithmetic, gate outcomes, and business results.
+1. **Overview & Telemetry:** Real-time revenue settled, average order value, buyer savings delivered, growth conversion rate, payment recovery rate, and authoritative Postgres product inventory.
+2. **Growth Rules:** Visual configuration and toggling of all 10 revenue growth rule types with live economics preview.
+3. **Agent Policy:** Autonomous spending limits, quote TTL, margin floor parameters, immutable version history, rollback controls, and a secondary **Developer Evidence & Protocol Manifest** drawer.
+4. **Activity & Ledger:** Chronological buyer journeys, session grouping, and explainable "Why this decision?" trace drawers.
 
 ---
 
 ## 🔌 Machine-Readable API Suite
 
-### 1. Catalog Discovery: `GET /api/agent/catalog`
-Returns structured JSON drops, inventory stock, variants, studio image URLs, and the **Merchant Capability Manifest** with active growth rules.
-
-### 2. Cryptographic Quote Negotiation: `POST /api/agent/quote`
-Evaluates agent bid against merchant category discount limits and issues an HMAC-SHA256 token embedding product ID, price, size, quantity, cart ID, expiry timestamp, and active policy version.
-
-### 3. Autonomous Checkout: `POST /api/razorpay/order`
-Evaluates all 8 safety gates, conditionally decrements inventory, and issues Razorpay payment orders with exact paise precision.
-
-### 4. Durable Trust Ledger: `GET /api/agent/ledger`
-Returns complete audit event telemetry and journey session traces.
-
-### 5. OpenAPI Specification: `GET /api/openapi.json`
-Complete OpenAPI 3.1 specification for custom AI agents, GPT Actions, and MCP bridges.
-
-### 6. Protocol Compatibility Adapters: `GET` & `POST /api/protocol/adapter`
-Provides protocol-shaped envelopes for:
-- `acp-shaped` (`acp-agentic-commerce-draft`)
-- `ap2-shaped` (`ap2-mandate-commerce`)
-- `x402-shaped` (`x402-http-payment-required`)
-
----
-
-## 📦 Demo Catalog & Seed Products
-
-| Product | Base Price | Stock | Negotiable | Max Discount | Studio Photography |
-|---|---|---|---|---|---|
-| **Argentina Sun of May Tee** | ₹649 | 79 | Yes | 10% | `/products/argentina-sun-tee.png` |
-| **Everyday Cargo Pants** | ₹999 | 35 | Yes | 8% | `/products/everyday-cargo-pants.png` |
-| **Court Canvas Sneakers** | ₹1,499 | 24 | No | 0% | `/products/court-canvas-sneakers.png` |
-| **Essential Street Cap** | ₹399 | 50 | Yes | 5% | `/products/essential-street-cap.png` |
-| **Utility Crossbody Sling** | ₹799 | 18 | Yes | 7% | `/products/utility-crossbody-sling.png` |
-| **Crew Socks 3-Pack** | ₹249 | 100 | Yes | 5% | `/products/crew-socks-3-pack.png` |
+* `GET /api/agent/catalog` — Live product catalog, stock counts, and merchant capability manifest with active growth rules.
+* `POST /api/agent/quote` — Bounded price negotiation issuing HMAC-SHA256 signed quote tokens.
+* `POST /api/razorpay/order` — Deterministic 8-gate autonomous checkout with paise-level precision.
+* `GET /api/agent/ledger` — Audit ledger event telemetry and journey session traces.
+* `GET /api/openapi.json` — OpenAPI 3.1 schema specification for AI agents and MCP bridges.
+* `GET / POST /api/protocol/adapter` — Multi-protocol compatibility wrappers:
+  * `acp-shaped` (Agent Commerce Protocol)
+  * `ap2-shaped` (Agent Payment Protocol 2)
+  * `x402-shaped` (HTTP 402 Payment Required)
 
 ---
 
 ## 🚀 Getting Started
 
-### 1. Prerequisites
-- Node.js 18+
-- pnpm (`npm install -g pnpm`)
-- Supabase project & Razorpay test keys
-
-### 2. Environment Configuration (`.env.local`)
+### 1. Environment Configuration (`.env.local`)
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-anon-key
@@ -136,35 +124,25 @@ RAZORPAY_KEY_SECRET=your_key_secret
 NEXT_PUBLIC_BASE_URL=http://localhost:3000
 ```
 
-### 3. Install & Seed
+### 2. Install & Seed
 ```bash
 # Install dependencies
 pnpm install
 
-# Seed authoritative products
+# Seed authoritative Supabase products
 node scratch/seed_catalog.js
 
 # Start development server
 pnpm dev
 ```
 
-### 4. Build & Production
-```bash
-# Compile optimized production bundle
-pnpm build
-
-# Start production server
-pnpm start
-```
-
 ---
 
 ## 🧪 Comprehensive Regression Suite
 
-ZeroClick includes an automated 24-boundary regression test suite covering all safety rails, growth rules, and protocol adapters:
+Run the automated 24-boundary regression test suite covering all safety rails, growth rules, and protocol adapters:
 
 ```bash
-# Run the complete 24-boundary regression suite
 node scratch/test_growth_platform_regression.js
 ```
 
