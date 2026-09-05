@@ -6,13 +6,13 @@ import { getMerchantConfig, getActivePolicyVersion } from "./merchant-config";
  * Mapping of product slugs to exact local public assets
  */
 export const PRODUCT_ASSET_MAP: Record<string, string> = {
-  "argentina-sun-tee": "/products/argentina-sun-tee.jpg",
-  "argentina-sun-of-may-tee": "/products/argentina-sun-tee.jpg",
-  "everyday-cargo-pants": "/products/everyday-cargo-pants.jpg",
-  "court-canvas-sneakers": "/products/court-canvas-sneakers.jpg",
-  "essential-street-cap": "/products/essential-street-cap.jpg",
-  "utility-crossbody-sling": "/products/utility-crossbody-sling.jpg",
-  "crew-socks-3-pack": "/products/crew-socks-3-pack.jpg",
+  "argentina-sun-tee": "/products/argentina-sun-tee.png",
+  "argentina-sun-of-may-tee": "/products/argentina-sun-tee.png",
+  "everyday-cargo-pants": "/products/everyday-cargo-pants.png",
+  "court-canvas-sneakers": "/products/court-canvas-sneakers.png",
+  "essential-street-cap": "/products/essential-street-cap.png",
+  "utility-crossbody-sling": "/products/utility-crossbody-sling.png",
+  "crew-socks-3-pack": "/products/crew-socks-3-pack.png",
 };
 
 /**
@@ -31,12 +31,7 @@ export function getBaseUrl(): string {
  */
 export function toAbsoluteImageUrl(imagePath: string, baseUrl: string = getBaseUrl()): string {
   if (!imagePath) return "";
-  let cleanPath = imagePath;
-  if (cleanPath.startsWith("/products/") && cleanPath.endsWith(".png")) {
-    cleanPath = cleanPath.replace(/\.png$/, ".jpg");
-  } else if (cleanPath.startsWith("https://razorpay-pod.vercel.app/products/") && cleanPath.endsWith(".png")) {
-    cleanPath = cleanPath.replace(/\.png$/, ".jpg");
-  }
+  const cleanPath = imagePath;
   if (cleanPath.startsWith("http://") || cleanPath.startsWith("https://")) {
     return cleanPath;
   }
