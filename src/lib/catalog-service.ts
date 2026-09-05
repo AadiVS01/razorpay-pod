@@ -157,6 +157,7 @@ export function transformProductForAgent(product: Product): AgentProductItem {
     stock: displayStock,
     in_stock: product.stock > 0,
     image_url: primaryImageUrl,
+    image_markdown: `![${product.name}](${primaryImageUrl})`,
     images: finalImages,
     image: primaryImageUrl,
     color_images: resolvedColorImages,
@@ -317,6 +318,13 @@ export async function getAgentCatalog(filters?: CatalogFilterParams): Promise<Ag
     active_bundles: activeBundles,
     promotions: activeGrowthRules,
     products: agentProducts,
+    agent_instructions: {
+      order_endpoint: "/api/razorpay/order",
+      quote_endpoint: "/api/agent/quote",
+      currency: "INR",
+      max_recommended_single_cart_inr: (config.policy.max_autonomous_checkout_paise || 500000) / 100,
+      notes: "When displaying or recommending products to the user in chat, you MUST render product images using Markdown: ![Product Name](image_url). Do NOT use plain text links.",
+    },
     autonomous_checkout: {
       endpoint: "/api/razorpay/order",
       method: "POST",
