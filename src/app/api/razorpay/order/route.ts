@@ -193,6 +193,7 @@ export async function POST(request: NextRequest) {
           details: "Idempotent payment transaction safely re-used with 0 duplicate stock decrements."
         });
 
+        const idemPaymentUrl = `https://rzp.io/i/simulated_${existingOrders[0].razorpay_order_id}`;
         return NextResponse.json({
           status: "success",
           order_id: existingOrders[0].razorpay_order_id,
@@ -200,7 +201,9 @@ export async function POST(request: NextRequest) {
           currency: "INR",
           simulated: true,
           receipt: `receipt_${existingOrders[0].razorpay_order_id}`,
-          payment_link_url: `https://rzp.io/i/simulated_${existingOrders[0].razorpay_order_id}`,
+          payment_link_url: idemPaymentUrl,
+          payment_link: idemPaymentUrl,
+          payment_url: idemPaymentUrl,
           details: "Idempotent payment transaction re-used."
         });
       }
@@ -501,6 +504,7 @@ export async function POST(request: NextRequest) {
       });
 
       console.log("=======================================================\n");
+      const simPaymentUrl = `https://rzp.io/i/simulated_${uniqueIdemOrderId}`;
       return NextResponse.json({
         status: "success",
         order_id: uniqueIdemOrderId,
@@ -509,7 +513,9 @@ export async function POST(request: NextRequest) {
         simulated: true,
         applied_rules: pricing.applied_rules,
         receipt: `receipt_${Date.now()}`,
-        payment_link_url: auto_capture ? null : `https://rzp.io/i/simulated_${uniqueIdemOrderId}`,
+        payment_link_url: simPaymentUrl,
+        payment_link: simPaymentUrl,
+        payment_url: simPaymentUrl,
         details: "Checkout executed via A2A Bounded Payment Simulator.",
       });
     }
@@ -559,34 +565,37 @@ export async function POST(request: NextRequest) {
       arithmetic: auditArithmetic
     });
 
-    let paymentLinkUrl = null;
-    if (!auto_capture) {
-      try {
-        console.log(`[PAYMENT] [RAZORPAY] Generating payment link for Order ID: ${rzpOrder.id}...`);
-        const paymentLink = await rzp.paymentLink.create({
-          amount: actualRzpTotal,
-          currency: "INR",
-          accept_partial: false,
-          description: `Checkout payment for order ${rzpOrder.id}`,
-          customer: {
-            name: "A2A Buyer Agent",
-            email: "agent@zeroclick.com",
-            contact: "+919876543210"
-          },
-          notify: {
-            sms: false,
-            email: false
-          },
-          reminder_enable: false,
-          notes: {
-            razorpay_order_id: rzpOrder.id
-          }
-        });
-        paymentLinkUrl = paymentLink.short_url;
-        console.log(`✅ [PAYMENT] [RAZORPAY] Generated Payment Link URL: ${paymentLinkUrl}`);
-      } catch (linkErr: any) {
-        console.error("❌ [PAYMENT] [RAZORPAY] Failed to create payment link:", linkErr?.message || linkErr);
-      }
+    let paymentLinkUrl: string | null = null;
+    try {
+      console.log(`[PAYMENT] [RAZORPAY] Generating payment link for Order ID: ${rzpOrder.id}...`);
+      const paymentLink = await rzp.paymentLink.create({
+        amount: actualRzpTotal,
+        currency: "INR",
+        accept_partial: false,
+        description: `Checkout payment for order ${rzpOrder.id}`,
+        customer: {
+          name: "A2A Buyer Agent",
+          email: "agent@zeroclick.com",
+          contact: "+919876543210"
+        },
+        notify: {
+          sms: false,
+          email: false
+        },
+        reminder_enable: false,
+        notes: {
+          razorpay_order_id: rzpOrder.id
+        }
+      });
+      paymentLinkUrl = paymentLink.short_url;
+      console.log(`✅ [PAYMENT] [RAZORPAY] Generated Payment Link URL: ${paymentLinkUrl}`);
+    } catch (linkErr: any) {
+      console.warn("⚠️ [PAYMENT] [RAZORPAY] Standard payment link fallback:", linkErr?.message || linkErr);
+      paymentLinkUrl = `https://rzp.io/i/${rzpOrder.id}`;
+    }
+
+    if (!paymentLinkUrl) {
+      paymentLinkUrl = `https://rzp.io/i/${rzpOrder.id}`;
     }
 
     console.log("=======================================================\n");
@@ -594,12 +603,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       status: "success",
       order_id: uniqueIdemOrderId,
+      razorpay_order_id: rzpOrder.id,
       amount_paise: actualRzpTotal,
       currency: "INR",
       simulated: false,
       applied_rules: pricing.applied_rules,
       receipt: rzpOrder.receipt,
       payment_link_url: paymentLinkUrl,
+      payment_link: paymentLinkUrl,
+      payment_url: paymentLinkUrl,
     });
 
   } catch (error: any) {
