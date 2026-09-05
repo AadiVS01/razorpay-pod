@@ -43,7 +43,8 @@ import {
   Code,
   FileCode,
   Terminal,
-  Copy
+  Copy,
+  Trash2
 } from "lucide-react";
 import {
   MerchantConfig,
@@ -284,6 +285,23 @@ export const MerchantControlCenter: React.FC = () => {
       : [...currentIds, productId];
     
     handleUpdateGrowthRule(ruleIndex, "product_ids", newIds);
+  };
+
+  const handleDeleteGrowthRule = (index: number) => {
+    if (!config || !config.growth_rules?.[index]) return;
+    const ruleToDelete = config.growth_rules[index];
+    const confirmed = window.confirm(`Are you sure you want to delete the growth rule "${ruleToDelete.name}"?`);
+    if (!confirmed) return;
+
+    const updated = config.growth_rules.filter((_, i) => i !== index);
+    setConfig({
+      ...config,
+      growth_rules: updated
+    });
+
+    if (selectedRuleIndex >= updated.length) {
+      setSelectedRuleIndex(Math.max(0, updated.length - 1));
+    }
   };
 
   const handleCreateNewRule = () => {
@@ -725,16 +743,25 @@ export const MerchantControlCenter: React.FC = () => {
                       {RULE_TYPE_METADATA[currentGrowthRule.type]?.label || currentGrowthRule.type}
                     </span>
                     
-                    <button
-                      onClick={() => handleUpdateGrowthRule(selectedRuleIndex, "active", !currentGrowthRule.active)}
-                      className={`px-3 py-1 rounded-xl text-xs font-semibold border transition-all ${
-                        currentGrowthRule.active
-                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                          : "bg-neutral-100 text-neutral-500 border-black/5"
-                      }`}
-                    >
-                      {currentGrowthRule.active ? "Rule is Active" : "Rule is Inactive"}
-                    </button>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => handleUpdateGrowthRule(selectedRuleIndex, "active", !currentGrowthRule.active)}
+                        className={`px-3 py-1 rounded-xl text-xs font-semibold border transition-all ${
+                          currentGrowthRule.active
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            : "bg-neutral-100 text-neutral-500 border-black/5"
+                        }`}
+                      >
+                        {currentGrowthRule.active ? "Rule is Active" : "Rule is Inactive"}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteGrowthRule(selectedRuleIndex)}
+                        className="p-1.5 rounded-xl text-neutral-400 hover:text-red-600 hover:bg-red-50 border border-black/5 hover:border-red-200 transition-all"
+                        title="Delete this growth rule"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
                   <div>

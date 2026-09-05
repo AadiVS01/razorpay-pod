@@ -269,6 +269,11 @@ const INITIAL_VERSION: PolicyVersionSnapshot = {
   growth_rules: [...DEFAULT_CONFIG.growth_rules]
 };
 
+import { getAdminSupabase, supabasePublic } from "./supabase";
+
+let memoryConfig: MerchantConfig | null = null;
+let memoryVersions: PolicyVersionSnapshot[] | null = null;
+
 function ensureFilesExist(): void {
   try {
     if (!fs.existsSync(configDir)) {
@@ -289,20 +294,33 @@ function ensureFilesExist(): void {
  * Server-only helper to read active merchant settings
  */
 export function getMerchantConfig(): MerchantConfig {
+  if (memoryConfig) {
+    return {
+      policy: { ...DEFAULT_CONFIG.policy, ...memoryConfig.policy },
+      product_overrides: memoryConfig.product_overrides || DEFAULT_CONFIG.product_overrides,
+      bundle_rules: memoryConfig.bundle_rules || DEFAULT_CONFIG.bundle_rules,
+      growth_rules: memoryConfig.growth_rules || DEFAULT_GROWTH_RULES
+    };
+  }
+
   try {
     ensureFilesExist();
-    const data = fs.readFileSync(configPath, "utf-8");
-    const parsed = JSON.parse(data);
-    return {
-      policy: { ...DEFAULT_CONFIG.policy, ...parsed.policy },
-      product_overrides: parsed.product_overrides || DEFAULT_CONFIG.product_overrides,
-      bundle_rules: parsed.bundle_rules || DEFAULT_CONFIG.bundle_rules,
-      growth_rules: parsed.growth_rules || DEFAULT_GROWTH_RULES
-    };
+    if (fs.existsSync(configPath)) {
+      const data = fs.readFileSync(configPath, "utf-8");
+      const parsed = JSON.parse(data);
+      memoryConfig = {
+        policy: { ...DEFAULT_CONFIG.policy, ...parsed.policy },
+        product_overrides: parsed.product_overrides || DEFAULT_CONFIG.product_overrides,
+        bundle_rules: parsed.bundle_rules || DEFAULT_CONFIG.bundle_rules,
+        growth_rules: parsed.growth_rules || DEFAULT_GROWTH_RULES
+      };
+      return memoryConfig;
+    }
   } catch (err) {
-    console.error("❌ [MERCHANT_CONFIG] Failed to read settings, returning defaults:", err);
-    return DEFAULT_CONFIG;
+    console.warn("⚠️ [MERCHANT_CONFIG] Local read fallback (using in-memory):", err);
   }
+
+  return DEFAULT_CONFIG;
 }
 
 /**
@@ -346,26 +364,39 @@ export function getDerivedOrderCounts(events?: any[]): Record<string, number> {
  * Retrieves all immutable policy version records paired with derived quote and order usage counts
  */
 export function getPolicyVersions(events?: any[]): (PolicyVersionSnapshot & { quote_count: number; order_count?: number })[] {
-  try {
-    ensureFilesExist();
-    const data = fs.readFileSync(versionsPath, "utf-8");
-    const versions: PolicyVersionSnapshot[] = JSON.parse(data);
-    const quoteCounts = getDerivedQuoteCounts(events);
-    const orderCounts = getDerivedOrderCounts(events);
+  let versions: PolicyVersionSnapshot[] = [];
 
-    return versions.map(v => {
-      const verKey = v.version.toLowerCase();
-      return {
-        ...v,
-        growth_rules: v.growth_rules || DEFAULT_GROWTH_RULES,
-        quote_count: quoteCounts[verKey] || 0,
-        order_count: orderCounts[verKey] || 0,
-      };
-    });
-  } catch (err) {
-    console.error("❌ [POLICY_VERSION] Failed to read policy versions:", err);
-    return [{ ...INITIAL_VERSION, quote_count: 0, order_count: 0 }];
+  if (memoryVersions && memoryVersions.length > 0) {
+    versions = memoryVersions;
+  } else {
+    try {
+      ensureFilesExist();
+      if (fs.existsSync(versionsPath)) {
+        const data = fs.readFileSync(versionsPath, "utf-8");
+        versions = JSON.parse(data);
+        memoryVersions = versions;
+      }
+    } catch (err) {
+      console.warn("⚠️ [POLICY_VERSION] Local read fallback (using in-memory):", err);
+    }
   }
+
+  if (!versions || versions.length === 0) {
+    versions = [{ ...INITIAL_VERSION }];
+  }
+
+  const quoteCounts = getDerivedQuoteCounts(events);
+  const orderCounts = getDerivedOrderCounts(events);
+
+  return versions.map(v => {
+    const verKey = v.version.toLowerCase();
+    return {
+      ...v,
+      growth_rules: v.growth_rules || DEFAULT_GROWTH_RULES,
+      quote_count: quoteCounts[verKey] || 0,
+      order_count: orderCounts[verKey] || 0,
+    };
+  });
 }
 
 /**
@@ -425,11 +456,20 @@ export function validateMerchantConfig(config: MerchantConfig): void {
  */
 export function saveMerchantConfig(config: MerchantConfig, changeSummary?: string): PolicyVersionSnapshot {
   validateMerchantConfig(config);
-  ensureFilesExist();
 
-  // Read existing versions
-  const versionsData = fs.readFileSync(versionsPath, "utf-8");
-  const versions: PolicyVersionSnapshot[] = JSON.parse(versionsData);
+  // Read existing versions from memory or file
+  let versions: PolicyVersionSnapshot[] = memoryVersions || [];
+  if (versions.length === 0) {
+    try {
+      ensureFilesExist();
+      if (fs.existsSync(versionsPath)) {
+        const versionsData = fs.readFileSync(versionsPath, "utf-8");
+        versions = JSON.parse(versionsData);
+      }
+    } catch {
+      versions = [{ ...INITIAL_VERSION }];
+    }
+  }
 
   // Check if policy parameters actually changed
   const currentActive = versions.find(v => v.status === "active") || versions[versions.length - 1];
@@ -440,12 +480,22 @@ export function saveMerchantConfig(config: MerchantConfig, changeSummary?: strin
     JSON.stringify(currentActive.growth_rules || []) === JSON.stringify(config.growth_rules || []);
 
   if (isPolicyEqual) {
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
+    memoryConfig = config;
+    try {
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
+    } catch {
+      // Ignore EROFS in serverless runtime
+    }
     return currentActive;
   }
 
-  // Generate new immutable version
-  const nextNum = versions.length + 1;
+  // Generate next version tag: v(next)
+  let maxV = 0;
+  for (const v of versions) {
+    const num = parseInt(v.version.replace(/^v/, "") || "0");
+    if (num > maxV) maxV = num;
+  }
+  const nextNum = maxV + 1;
   const nextVersionTag = `v${nextNum}`;
 
   // Mark all previous versions as superseded
@@ -467,9 +517,47 @@ export function saveMerchantConfig(config: MerchantConfig, changeSummary?: strin
 
   updatedVersions.push(newVersion);
 
-  // Save active config and immutable history
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
-  fs.writeFileSync(versionsPath, JSON.stringify(updatedVersions, null, 2), "utf-8");
+  // Update in-memory cache
+  memoryConfig = config;
+  memoryVersions = updatedVersions;
+
+  // Persist to local filesystem (gracefully ignoring EROFS on Vercel)
+  try {
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
+    fs.writeFileSync(versionsPath, JSON.stringify(updatedVersions, null, 2), "utf-8");
+  } catch (fsErr) {
+    console.log("ℹ️ [POLICY_VERSION] Serverless environment: saved in memory and Supabase.");
+  }
+
+  // Asynchronously persist policy snapshot to Supabase trust_ledger_events
+  try {
+    const supabase = getAdminSupabase() || supabasePublic;
+    if (supabase) {
+      supabase.from("trust_ledger_events").insert({
+        event_id: `snapshot_${nextVersionTag}_${Date.now()}`,
+        event_type: "POLICY_SNAPSHOT",
+        journey_id: `policy_${nextVersionTag}`,
+        policy_version: nextVersionTag,
+        status: "COMPLETED",
+        error_code: "SUCCESS",
+        amount_paise: config.policy.max_autonomous_checkout_paise,
+        currency: "INR",
+        payload: {
+          action: "POLICY_SNAPSHOT",
+          version: nextVersionTag,
+          change_summary: newVersion.change_summary,
+          config,
+          timestamp: newVersion.created_at
+        },
+        created_at: newVersion.created_at
+      }).then(({ error }) => {
+        if (error) console.warn("⚠️ [POLICY_VERSION] Supabase snapshot notice:", error.message);
+        else console.log(`📜 [POLICY_VERSION] [SUPABASE] Persisted snapshot ${nextVersionTag}`);
+      });
+    }
+  } catch (dbErr) {
+    console.warn("⚠️ [POLICY_VERSION] DB write exception:", dbErr);
+  }
 
   console.log(`✅ [POLICY_VERSION] Created immutable version ${nextVersionTag}: ${newVersion.change_summary}`);
   return newVersion;
@@ -479,11 +567,8 @@ export function saveMerchantConfig(config: MerchantConfig, changeSummary?: strin
  * Rollback helper: creates a NEW version cloning the historical snapshot (never mutates history)
  */
 export function rollbackToVersion(targetVersionId: string): PolicyVersionSnapshot {
-  ensureFilesExist();
-  const versionsData = fs.readFileSync(versionsPath, "utf-8");
-  const versions: PolicyVersionSnapshot[] = JSON.parse(versionsData);
-
-  const targetSnapshot = versions.find(v => v.version === targetVersionId);
+  const versions = getPolicyVersions();
+  const targetSnapshot = versions.find(v => v.version.toLowerCase() === targetVersionId.toLowerCase());
   if (!targetSnapshot) {
     throw new Error(`Target policy version "${targetVersionId}" not found.`);
   }
