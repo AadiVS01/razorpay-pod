@@ -325,22 +325,42 @@ export async function calculateCartPricing(input: CartPricingInput): Promise<Car
 }
 
 /**
+ * Generates a deterministic hash fingerprint for an array of cart items
+ */
+export interface CartItemFingerprint {
+  id: string;
+  quantity: number;
+  size?: string;
+  color?: string;
+}
+
+export function computeItemsHash(items: CartItemFingerprint[]): string {
+  const normalized = [...items]
+    .map(it => `${it.id}:${it.quantity}:${it.size || ""}`)
+    .sort()
+    .join(";");
+  return crypto.createHash("sha256").update(normalized).digest("hex").substring(0, 16);
+}
+
+/**
  * Creates a Cryptographically Signed HMAC Quote Token binding the FINAL CART TOTAL
  */
 export function signQuoteToken(params: {
-  productId: string;
+  productId?: string;
+  items?: CartItemFingerprint[];
   finalTotalPaise: number;
-  size: string;
-  quantity: number;
+  size?: string;
+  quantity?: number;
   cartId: string;
   policyVersion: string;
   expirySeconds?: number;
 }): { quoteId: string; expiresAt: number } {
   const {
     productId,
+    items,
     finalTotalPaise,
-    size,
-    quantity,
+    size = "",
+    quantity = 1,
     cartId,
     policyVersion,
     expirySeconds = 900
@@ -349,8 +369,18 @@ export function signQuoteToken(params: {
   const secret = process.env.RAZORPAY_KEY_SECRET || "merchant_gateway_secret_key_1029";
   const expiresAt = Date.now() + (expirySeconds * 1000);
   
-  // Signature message binds: productId : finalTotalPaise : expiresAt : size : quantity : cartId : policyVersion
-  const message = `${productId}:${finalTotalPaise}:${expiresAt}:${size}:${quantity}:${cartId}:${policyVersion}`;
+  let message: string;
+  if (items && items.length > 0) {
+    const itemsHash = computeItemsHash(items);
+    // Multi-item signature message binds: items_<itemsHash> : finalTotalPaise : expiresAt : cartId : policyVersion
+    message = `items_${itemsHash}:${finalTotalPaise}:${expiresAt}:${cartId}:${policyVersion}`;
+  } else if (productId) {
+    // Single-item signature message binds: productId : finalTotalPaise : expiresAt : size : quantity : cartId : policyVersion
+    message = `${productId}:${finalTotalPaise}:${expiresAt}:${size}:${quantity}:${cartId}:${policyVersion}`;
+  } else {
+    throw new Error("signQuoteToken requires either 'items' or 'productId'");
+  }
+
   const hmac = crypto.createHmac("sha256", secret).update(message).digest("hex");
   const quoteId = `quote_${Buffer.from(`${message}:${hmac}`).toString("base64")}`;
 
@@ -359,6 +389,8 @@ export function signQuoteToken(params: {
 
 export interface VerifiedQuote {
   valid: boolean;
+  isMultiItem?: boolean;
+  itemsHash?: string;
   productId?: string;
   finalTotalPaise?: number;
   expiresAt?: number;
@@ -382,34 +414,63 @@ export function verifyQuoteToken(quoteId: string): VerifiedQuote {
     const decoded = Buffer.from(token, "base64").toString("utf-8");
     const parts = decoded.split(":");
 
-    if (parts.length !== 8) {
-      return { valid: false, error: "MALFORMED_QUOTE_TOKEN" };
-    }
-
-    const [qProductId, qPriceStr, qExpiresStr, qSize, qQtyStr, qCartId, qVersion, qHmac] = parts;
     const secret = process.env.RAZORPAY_KEY_SECRET || "merchant_gateway_secret_key_1029";
-    const verifyMessage = `${qProductId}:${qPriceStr}:${qExpiresStr}:${qSize}:${qQtyStr}:${qCartId}:${qVersion}`;
-    const expectedHmac = crypto.createHmac("sha256", secret).update(verifyMessage).digest("hex");
 
-    if (expectedHmac !== qHmac) {
-      return { valid: false, error: "HMAC_SIGNATURE_MISMATCH" };
+    // Multi-item format: items_<itemsHash> : price : expires : cartId : policyVersion : hmac (6 parts)
+    if (parts.length === 6 && parts[0].startsWith("items_")) {
+      const [qItemsPrefixed, qPriceStr, qExpiresStr, qCartId, qVersion, qHmac] = parts;
+      const verifyMessage = `${qItemsPrefixed}:${qPriceStr}:${qExpiresStr}:${qCartId}:${qVersion}`;
+      const expectedHmac = crypto.createHmac("sha256", secret).update(verifyMessage).digest("hex");
+
+      if (expectedHmac !== qHmac) {
+        return { valid: false, error: "HMAC_SIGNATURE_MISMATCH" };
+      }
+
+      const expiresAt = parseInt(qExpiresStr, 10);
+      if (Date.now() > expiresAt) {
+        return { valid: false, error: "QUOTE_EXPIRED" };
+      }
+
+      return {
+        valid: true,
+        isMultiItem: true,
+        itemsHash: qItemsPrefixed.replace(/^items_/, ""),
+        finalTotalPaise: parseInt(qPriceStr, 10),
+        expiresAt,
+        cartId: qCartId,
+        policyVersion: qVersion,
+      };
     }
 
-    const expiresAt = parseInt(qExpiresStr, 10);
-    if (Date.now() > expiresAt) {
-      return { valid: false, error: "QUOTE_EXPIRED" };
+    // Legacy Single-item format: productId : price : expires : size : quantity : cartId : policyVersion : hmac (8 parts)
+    if (parts.length === 8) {
+      const [qProductId, qPriceStr, qExpiresStr, qSize, qQtyStr, qCartId, qVersion, qHmac] = parts;
+      const verifyMessage = `${qProductId}:${qPriceStr}:${qExpiresStr}:${qSize}:${qQtyStr}:${qCartId}:${qVersion}`;
+      const expectedHmac = crypto.createHmac("sha256", secret).update(verifyMessage).digest("hex");
+
+      if (expectedHmac !== qHmac) {
+        return { valid: false, error: "HMAC_SIGNATURE_MISMATCH" };
+      }
+
+      const expiresAt = parseInt(qExpiresStr, 10);
+      if (Date.now() > expiresAt) {
+        return { valid: false, error: "QUOTE_EXPIRED" };
+      }
+
+      return {
+        valid: true,
+        isMultiItem: false,
+        productId: qProductId,
+        finalTotalPaise: parseInt(qPriceStr, 10),
+        expiresAt,
+        size: qSize,
+        quantity: parseInt(qQtyStr, 10),
+        cartId: qCartId,
+        policyVersion: qVersion,
+      };
     }
 
-    return {
-      valid: true,
-      productId: qProductId,
-      finalTotalPaise: parseInt(qPriceStr, 10),
-      expiresAt,
-      size: qSize,
-      quantity: parseInt(qQtyStr, 10),
-      cartId: qCartId,
-      policyVersion: qVersion,
-    };
+    return { valid: false, error: "MALFORMED_QUOTE_TOKEN" };
   } catch (err: any) {
     return { valid: false, error: err?.message || "TOKEN_DECODE_FAILED" };
   }

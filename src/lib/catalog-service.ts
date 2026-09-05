@@ -324,6 +324,7 @@ export async function getAgentCatalog(filters?: CatalogFilterParams): Promise<Ag
       quote_endpoint: "/api/agent/quote",
       currency: "INR",
       max_recommended_single_cart_inr: (config.policy.max_autonomous_checkout_paise || 500000) / 100,
+      bundle_quote_instruction: "To get an authoritative signed quote for a bundle or multi-item order, POST to /api/agent/quote with items: [{ id, quantity, size }].",
       notes: "When displaying or recommending products to the user in chat, you MUST render product images using Markdown: ![Product Name](image_url). Do NOT use plain text links.",
     },
     autonomous_checkout: {

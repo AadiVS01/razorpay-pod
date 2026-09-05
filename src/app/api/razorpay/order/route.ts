@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminSupabase, supabasePublic } from "@/lib/supabase";
 import { appendAuditEvent, logAuditEvent } from "@/lib/audit-ledger";
 import { getMerchantConfig, getActivePolicyVersion } from "@/lib/merchant-config";
-import { calculateCartPricing, verifyQuoteToken } from "@/lib/cart-pricing";
+import { calculateCartPricing, verifyQuoteToken, computeItemsHash } from "@/lib/cart-pricing";
 import Razorpay from "razorpay";
 
 export const dynamic = "force-dynamic";
@@ -260,12 +260,25 @@ export async function POST(request: NextRequest) {
 
       currentPolicyVersion = verified.policyVersion;
       const clientCartId = cart_id || "default_cart";
-      const matchedItem = items.find(item => (item.id || item.product_id) === verified.productId);
-      const parsedItemQty = matchedItem ? parseInt(String(matchedItem.quantity), 10) : 0;
 
-      // Verify cart scope: product ID, quantity, and cart ID must match exactly
-      if (!matchedItem || parsedItemQty !== verified.quantity || verified.cartId !== clientCartId) {
-        console.error("❌ [SECURITY] [QUOTE_SCOPE_MISMATCH] Cart items or quantity do not match quote scope.");
+      let scopeMatched = false;
+      if (verified.isMultiItem && verified.itemsHash) {
+        const clientItemsFingerprints = items.map((it: any) => ({
+          id: it.id || it.product_id,
+          quantity: Math.max(1, parseInt(String(it.quantity || 1), 10) || 1),
+          size: it.size || "Standard",
+          color: it.color
+        }));
+        const clientItemsHash = computeItemsHash(clientItemsFingerprints);
+        scopeMatched = (clientItemsHash === verified.itemsHash && verified.cartId === clientCartId);
+      } else if (verified.productId) {
+        const matchedItem = items.find((item: any) => (item.id || item.product_id) === verified.productId);
+        const parsedItemQty = matchedItem ? parseInt(String(matchedItem.quantity), 10) : 0;
+        scopeMatched = Boolean(matchedItem && parsedItemQty === verified.quantity && verified.cartId === clientCartId);
+      }
+
+      if (!scopeMatched) {
+        console.error("❌ [SECURITY] [QUOTE_SCOPE_MISMATCH] Cart items, quantities, or cart ID do not match quote scope.");
         
         await appendAuditEvent({
           actor: "AI Buyer Agent",
@@ -280,14 +293,14 @@ export async function POST(request: NextRequest) {
           policy_result: "BLOCKED",
           reason_code: "PRICE_MISMATCH",
           outcome: "FAILED",
-          details: "Quote token scope (quantity, item identity, or cart ID) does not match checkout request.",
+          details: "Quote token scope (items, quantities, or cart ID) does not match checkout request.",
           gate_results: { "Autonomy Gate": "PASS", "Mandate Bound": "PASS", "Quote Scope Match": "FAIL" }
         });
 
         return NextResponse.json({
           status: "error",
           error: "QUOTE_SCOPE_MISMATCH",
-          details: "The quote token scope (quantity, item identity, or cart ID) does not match your checkout request."
+          details: "The quote token scope (items, quantities, or cart ID) does not match your checkout request."
         }, { status: 422 });
       }
 

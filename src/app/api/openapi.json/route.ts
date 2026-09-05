@@ -185,8 +185,8 @@ export async function GET(request: Request) {
       },
       "/api/agent/quote": {
         post: {
-          summary: "Submit Programmatic Bid & Request Signed Quote",
-          description: "Submits an autonomous bid price for a product. Verifies merchant policy boundaries and returns an HMAC-SHA256 signed quote token with TTL expiry.",
+          summary: "Request Signed Quote for Cart, Bundle, or Programmatic Bid",
+          description: "Generates an authoritative, cryptographically signed HMAC quote token for a multi-item cart, active bundle (e.g. Match Day Bundle, Buy 3 Get 1 Free), or single-item negotiated bid. To quote a multi-product bundle or multi-item cart, pass the 'items' array. Returns agreed cart total, applied growth discounts, and signed quote_id required for checkout.",
           operationId: "submitBid",
           requestBody: {
             required: true,
@@ -194,14 +194,27 @@ export async function GET(request: Request) {
               "application/json": {
                 schema: {
                   type: "object",
-                  required: ["product_id", "size"],
                   properties: {
-                    product_id: { type: "string" },
-                    bid_price_paise: { type: "integer" },
-                    size: { type: "string" },
-                    quantity: { type: "integer", default: 1 },
-                    cart_id: { type: "string", default: "default_cart" },
-                    session_id: { type: "string" },
+                    items: {
+                      type: "array",
+                      description: "List of items for multi-item cart or bundle quoting. For bundle discounts (e.g. 2 items or B3G1), include all items here.",
+                      items: {
+                        type: "object",
+                        required: ["id"],
+                        properties: {
+                          id: { type: "string", description: "Product UUID" },
+                          quantity: { type: "integer", default: 1, description: "Quantity of this product" },
+                          size: { type: "string", description: "Selected size (e.g. 'S', 'M', 'L', '10', 'OS')" },
+                          color: { type: "string", description: "Selected color option" }
+                        }
+                      }
+                    },
+                    product_id: { type: "string", description: "Product UUID (alternative for single-item requests)" },
+                    size: { type: "string", description: "Product size (alternative for single-item requests)" },
+                    quantity: { type: "integer", default: 1, description: "Quantity for single-item request" },
+                    bid_price_paise: { type: "integer", description: "Optional programmatic bid price in paise for single item price negotiation" },
+                    cart_id: { type: "string", default: "default_cart", description: "Cart session ID matching subsequent checkout call" },
+                    session_id: { type: "string", description: "Client/Agent session identifier for telemetry" },
                     buyer_context: {
                       type: "object",
                       properties: {
