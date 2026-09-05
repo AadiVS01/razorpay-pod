@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS public.trust_ledger_events (
 );
 
 -- Optimized indexes for journey queries, policy version analytics & ledger feeds
+CREATE INDEX IF NOT EXISTS idx_trust_ledger_events_event_type ON public.trust_ledger_events(event_type);
 CREATE INDEX IF NOT EXISTS idx_trust_ledger_events_journey_id ON public.trust_ledger_events(journey_id);
 CREATE INDEX IF NOT EXISTS idx_trust_ledger_events_session_id ON public.trust_ledger_events(session_id);
 CREATE INDEX IF NOT EXISTS idx_trust_ledger_events_order_id ON public.trust_ledger_events(order_id);

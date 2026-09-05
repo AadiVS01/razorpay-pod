@@ -257,7 +257,7 @@ export async function POST(request: NextRequest) {
 
       currentPolicyVersion = verified.policyVersion;
       const clientCartId = cart_id || "default_cart";
-      const matchedItem = items.find(item => item.id === verified.productId);
+      const matchedItem = items.find(item => (item.id || item.product_id) === verified.productId);
       const parsedItemQty = matchedItem ? parseInt(String(matchedItem.quantity), 10) : 0;
 
       // Verify cart scope: product ID, quantity, and cart ID must match exactly

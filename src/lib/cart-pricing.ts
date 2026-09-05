@@ -97,7 +97,7 @@ export async function calculateCartPricing(input: CartPricingInput): Promise<Car
     throw new Error("Database client unavailable for authoritative pricing");
   }
 
-  const productIds = items.map((it) => it.id);
+  const productIds = items.map((it: any) => it.id || it.product_id).filter(Boolean);
   const { data: dbProducts, error } = await supabase
     .from("products")
     .select("*")
@@ -111,10 +111,11 @@ export async function calculateCartPricing(input: CartPricingInput): Promise<Car
   const activeVersion = policyVersion || getActivePolicyVersion();
 
   // 1. Build Evaluated Items from Authoritative DB Data
-  const evaluatedItems: EvaluatedItem[] = items.map((item) => {
-    const product = dbProducts.find((p) => p.id === item.id);
+  const evaluatedItems: EvaluatedItem[] = items.map((item: any) => {
+    const targetId = item.id || item.product_id;
+    const product = dbProducts.find((p) => p.id === targetId);
     if (!product) {
-      throw new Error(`Product ID "${item.id}" not found in authoritative catalog`);
+      throw new Error(`Product ID "${targetId}" not found in authoritative catalog`);
     }
 
     const qty = Math.max(1, parseInt(String(item.quantity || 1), 10));
@@ -274,8 +275,8 @@ export async function calculateCartPricing(input: CartPricingInput): Promise<Car
     }
   }
 
-  const lines: PricingLineItem[] = items.map((item) => {
-    const it = evaluatedItems.find((e) => e.product.id === item.id)!;
+  const lines: PricingLineItem[] = items.map((item: any) => {
+    const it = evaluatedItems.find((e) => e.product.id === (item.id || item.product_id))!;
     const unitPrice = it.product.price;
     const deliveredQty = it.quantity;
     const freeQty = freeQuantities[it.product.id] || 0;

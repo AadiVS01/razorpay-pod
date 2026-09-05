@@ -3,190 +3,76 @@
     "max_autonomous_checkout_paise": 400000,
     "mandate_required": true,
     "agent_can_recommend_bundles": true,
-    "agent_can_recommend_growth_rules": true,
     "agent_can_negotiate": true,
     "agent_can_checkout": true,
-    "quote_expiry_seconds": 600,
-    "can_discover_products": true,
-    "can_apply_promotions": true,
-    "can_offer_welcome_incentives": true,
-    "can_offer_returning_incentives": true,
-    "can_initiate_recovery": true,
-    "can_suggest_reorders": true,
-    "max_discount_percent": 25,
-    "margin_floor_percent": 60,
-    "promotion_stacking_allowed": false,
-    "max_recommendations_per_interaction": 2,
-    "recovery_retry_limit": 1
+    "quote_expiry_seconds": 600
   },
   "product_overrides": {
     "977da225-f3ed-46a0-abf1-4ae18739e1a1": {
       "negotiable": true,
       "max_discount_percent": 10
+    },
+    "dcac52b4-48e5-4c9a-9c10-b6f2510ec199": {
+      "negotiable": true,
+      "max_discount_percent": 8
+    },
+    "53717c5b-e2fe-4dbb-bbdb-d490fdd32c95": {
+      "negotiable": false,
+      "max_discount_percent": 0
+    },
+    "e715bc27-d310-4384-b1ff-86d342ccd8ae": {
+      "negotiable": true,
+      "max_discount_percent": 5
+    },
+    "a2a5cffc-db36-4d2c-9ed0-a6d0a78ae3a8": {
+      "negotiable": true,
+      "max_discount_percent": 7
+    },
+    "73bdabf5-c327-4780-a1e4-03ed277e67f0": {
+      "negotiable": true,
+      "max_discount_percent": 5
     }
   },
   "bundle_rules": [
     {
       "id": "bundle_complete_outfit",
       "name": "Complete Outfit",
-      "discount_percent": 15,
+      "discount_percent": 10,
       "active": true,
-      "product_a_id": "977da225-f3ed-46a0-abf1-4ae18739e1a1",
-      "product_b_id": "f2e7d02d-2de1-4638-a463-2a8525a3bc26",
-      "recommendation_reason": "Bundle matching pants for an elevated streetwear drop and 15% savings."
-    }
-  ],
-  "growth_rules": [
-    {
-      "id": "growth_bundle_outfit",
-      "name": "Complete Outfit Bundle",
-      "type": "bundle_discount",
-      "description": "Pair Argentina Sun Tee with Everyday Cargo Pants for 10% off.",
       "product_ids": [
         "977da225-f3ed-46a0-abf1-4ae18739e1a1",
         "dcac52b4-48e5-4c9a-9c10-b6f2510ec199"
       ],
-      "discount_percent": 10,
-      "stackable": false,
-      "active": true,
+      "product_a_id": "977da225-f3ed-46a0-abf1-4ae18739e1a1",
+      "product_b_id": "dcac52b4-48e5-4c9a-9c10-b6f2510ec199",
       "recommendation_reason": "Pair the Argentina Sun Tee with Everyday Cargo Pants for a complete streetwear fit with 10% savings."
     },
     {
-      "id": "growth_b3g1_socks",
-      "name": "Crew Socks Buy 3 Get 1 Free",
-      "type": "buy_x_get_y",
-      "description": "Buy 3 Crew Socks 3-Packs, get 1 additional pack free.",
-      "product_ids": [
-        "73bdabf5-c327-4780-a1e4-03ed277e67f0"
-      ],
-      "buy_quantity": 3,
-      "free_quantity": 1,
-      "max_redemptions_per_order": 1,
-      "stackable": false,
-      "active": true,
-      "recommendation_reason": "Stock up on streetwear basics: Buy 3 packs of Crew Socks and get 1 free automatically."
-    },
-    {
-      "id": "growth_qty_tee",
-      "name": "Tee Multi-Pack Volume Discount",
-      "type": "quantity_discount",
-      "description": "Buy 2 for 5% off, buy 3 or more for 10% off.",
-      "product_ids": [
-        "977da225-f3ed-46a0-abf1-4ae18739e1a1"
-      ],
-      "quantity_tiers": [
-        {
-          "min_quantity": 2,
-          "discount_percent": 5
-        },
-        {
-          "min_quantity": 3,
-          "discount_percent": 10
-        }
-      ],
-      "stackable": false,
-      "active": true,
-      "recommendation_reason": "Tiered drop savings: Buy 2 Argentina Sun Tees for 5% off, or 3+ for 10% off."
-    },
-    {
-      "id": "growth_cross_sell_cap",
-      "name": "Street Cap Accessory Cross-Sell",
-      "type": "cross_sell",
-      "description": "5% off Street Cap when paired with Argentina Sun Tee.",
-      "product_ids": [
-        "e715bc27-d310-4384-b1ff-86d342ccd8ae"
-      ],
-      "trigger_product_ids": [
-        "977da225-f3ed-46a0-abf1-4ae18739e1a1"
-      ],
-      "reward_product_ids": [
-        "e715bc27-d310-4384-b1ff-86d342ccd8ae"
-      ],
-      "discount_percent": 5,
-      "stackable": true,
-      "active": true,
-      "recommendation_reason": "Complete your head-to-toe look with an Essential Street Cap for an extra 5% off."
-    },
-    {
-      "id": "growth_upsell_sneakers",
-      "name": "Court Canvas Footwear Upgrade",
-      "type": "upsell",
-      "description": "8% off Court Canvas Sneakers when buying apparel.",
-      "product_ids": [
-        "53717c5b-e2fe-4dbb-bbdb-d490fdd32c95"
-      ],
-      "trigger_product_ids": [
-        "977da225-f3ed-46a0-abf1-4ae18739e1a1",
-        "dcac52b4-48e5-4c9a-9c10-b6f2510ec199"
-      ],
-      "reward_product_ids": [
-        "53717c5b-e2fe-4dbb-bbdb-d490fdd32c95"
-      ],
+      "id": "bundle_street_starter",
+      "name": "Street Starter",
       "discount_percent": 8,
-      "stackable": false,
       "active": true,
-      "recommendation_reason": "Upgrade your order with Court Canvas Sneakers for an exclusive 8% footwear discount."
+      "product_ids": [
+        "977da225-f3ed-46a0-abf1-4ae18739e1a1",
+        "53717c5b-e2fe-4dbb-bbdb-d490fdd32c95",
+        "e715bc27-d310-4384-b1ff-86d342ccd8ae"
+      ],
+      "product_a_id": "977da225-f3ed-46a0-abf1-4ae18739e1a1",
+      "product_b_id": "53717c5b-e2fe-4dbb-bbdb-d490fdd32c95",
+      "recommendation_reason": "Bundle the Tee, Court Canvas Sneakers, and Street Cap for an 8% head-to-toe combo discount."
     },
     {
-      "id": "growth_welcome_drop",
-      "name": "First Drop Welcome Privilege",
-      "type": "welcome_offer",
-      "description": "5% off first order (max ₹100) for new AI buyers.",
-      "product_ids": [],
+      "id": "bundle_carry_upgrade",
+      "name": "Carry Upgrade",
       "discount_percent": 5,
-      "max_discount_paise": 10000,
-      "buyer_eligibility": "new_buyer",
-      "stackable": false,
-      "active": true,
-      "recommendation_reason": "Welcome to ZeroClick: First-time buyers get 5% off (up to ₹100)."
-    },
-    {
-      "id": "growth_repeat_buyer",
-      "name": "Loyal Collector Privilege",
-      "type": "returning_buyer_offer",
-      "description": "5% off for returning buyers with 2+ completed purchases.",
-      "product_ids": [],
-      "discount_percent": 5,
-      "buyer_eligibility": "returning_buyer",
-      "stackable": false,
-      "active": true,
-      "recommendation_reason": "Thank you for returning: Repeat collectors receive 5% off their autonomous order."
-    },
-    {
-      "id": "growth_cart_threshold_vip",
-      "name": "High-Tier Order Credit",
-      "type": "cart_threshold_offer",
-      "description": "₹250 flat discount on orders ₹3,500 and above.",
-      "product_ids": [],
-      "min_cart_value_paise": 350000,
-      "discount_amount_paise": 25000,
-      "stackable": false,
-      "active": true,
-      "recommendation_reason": "Orders above ₹3,500 unlock an instant ₹250 High-Tier cart discount."
-    },
-    {
-      "id": "growth_recovery_incentive",
-      "name": "Instant Drop Recovery Incentive",
-      "type": "payment_recovery_offer",
-      "description": "5% discount on retry after payment glitch or timeout.",
-      "product_ids": [],
-      "discount_percent": 5,
-      "max_discount_paise": 15000,
-      "stackable": false,
-      "active": true,
-      "recommendation_reason": "We saved your drop: Apply an instant 5% recovery discount on retry."
-    },
-    {
-      "id": "growth_reorder_replenishment",
-      "name": "Seasonal Wardrobe Replenishment",
-      "type": "reorder_offer",
-      "description": "10% off replenishment orders placed after 30 days.",
-      "product_ids": [],
-      "reorder_interval_days": 30,
-      "discount_percent": 10,
-      "stackable": false,
-      "active": true,
-      "recommendation_reason": "Time to refresh: Reorder your favorite pieces after 30 days for 10% off."
+      "active": false,
+      "product_ids": [
+        "a2a5cffc-db36-4d2c-9ed0-a6d0a78ae3a8",
+        "e715bc27-d310-4384-b1ff-86d342ccd8ae"
+      ],
+      "product_a_id": "a2a5cffc-db36-4d2c-9ed0-a6d0a78ae3a8",
+      "product_b_id": "e715bc27-d310-4384-b1ff-86d342ccd8ae",
+      "recommendation_reason": "Add a Utility Crossbody Sling and Essential Street Cap for a 5% accessory upgrade."
     }
   ]
 }

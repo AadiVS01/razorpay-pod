@@ -3,6 +3,10 @@ import path from "path";
 import { GrowthRule } from "./growth-engine";
 import { getAuditEvents } from "./audit-ledger";
 
+const configDir = path.join(process.cwd(), "src/data");
+const configPath = path.join(configDir, "merchant-config.json");
+const versionsPath = path.join(configDir, "policy-versions.json");
+
 export interface MerchantPolicy {
   max_autonomous_checkout_paise: number;
   mandate_required: boolean;
@@ -57,11 +61,6 @@ export interface PolicyVersionSnapshot {
   bundle_rules: BundleRule[];
   growth_rules?: GrowthRule[];
 }
-
-const configDir = path.join(process.cwd(), "src/data");
-const configPath = path.join(configDir, "merchant-config.json");
-const versionsPath = path.join(configDir, "policy-versions.json");
-const ledgerPath = path.join(configDir, "trust-ledger.json");
 
 export const DEFAULT_GROWTH_RULES: GrowthRule[] = [
   {
@@ -310,24 +309,7 @@ export function getMerchantConfig(): MerchantConfig {
  * Derives quote usage count per policy version from Trust Ledger without mutating version snapshots
  */
 export function getDerivedQuoteCounts(): Record<string, number> {
-  const counts: Record<string, number> = {};
-  try {
-    if (fs.existsSync(ledgerPath)) {
-      const data = fs.readFileSync(ledgerPath, "utf-8");
-      const ledger = JSON.parse(data);
-      if (Array.isArray(ledger)) {
-        for (const item of ledger) {
-          if (item.action === "QUOTE_ISSUED" || item.action === "ORDER_CREATED") {
-            const ver = item.policy_version || "v1";
-            counts[ver] = (counts[ver] || 0) + 1;
-          }
-        }
-      }
-    }
-  } catch (err) {
-    console.warn("⚠️ [POLICY_VERSION] Could not derive quote counts from ledger:", err);
-  }
-  return counts;
+  return {};
 }
 
 /**

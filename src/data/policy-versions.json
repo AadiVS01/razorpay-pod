@@ -10332,17 +10332,68 @@
       "977da225-f3ed-46a0-abf1-4ae18739e1a1": {
         "negotiable": true,
         "max_discount_percent": 10
+      },
+      "dcac52b4-48e5-4c9a-9c10-b6f2510ec199": {
+        "negotiable": true,
+        "max_discount_percent": 8
+      },
+      "53717c5b-e2fe-4dbb-bbdb-d490fdd32c95": {
+        "negotiable": false,
+        "max_discount_percent": 0
+      },
+      "e715bc27-d310-4384-b1ff-86d342ccd8ae": {
+        "negotiable": true,
+        "max_discount_percent": 5
+      },
+      "a2a5cffc-db36-4d2c-9ed0-a6d0a78ae3a8": {
+        "negotiable": true,
+        "max_discount_percent": 7
+      },
+      "73bdabf5-c327-4780-a1e4-03ed277e67f0": {
+        "negotiable": true,
+        "max_discount_percent": 5
       }
     },
     "bundle_rules": [
       {
         "id": "bundle_complete_outfit",
         "name": "Complete Outfit",
-        "discount_percent": 15,
+        "discount_percent": 10,
         "active": true,
+        "product_ids": [
+          "977da225-f3ed-46a0-abf1-4ae18739e1a1",
+          "dcac52b4-48e5-4c9a-9c10-b6f2510ec199"
+        ],
         "product_a_id": "977da225-f3ed-46a0-abf1-4ae18739e1a1",
-        "product_b_id": "f2e7d02d-2de1-4638-a463-2a8525a3bc26",
-        "recommendation_reason": "Bundle matching pants for an elevated streetwear drop and 15% savings."
+        "product_b_id": "dcac52b4-48e5-4c9a-9c10-b6f2510ec199",
+        "recommendation_reason": "Pair the Argentina Sun Tee with Everyday Cargo Pants for a complete streetwear fit with 10% savings."
+      },
+      {
+        "id": "bundle_street_starter",
+        "name": "Street Starter",
+        "discount_percent": 8,
+        "active": true,
+        "product_ids": [
+          "977da225-f3ed-46a0-abf1-4ae18739e1a1",
+          "53717c5b-e2fe-4dbb-bbdb-d490fdd32c95",
+          "e715bc27-d310-4384-b1ff-86d342ccd8ae"
+        ],
+        "product_a_id": "977da225-f3ed-46a0-abf1-4ae18739e1a1",
+        "product_b_id": "53717c5b-e2fe-4dbb-bbdb-d490fdd32c95",
+        "recommendation_reason": "Bundle the Tee, Court Canvas Sneakers, and Street Cap for an 8% head-to-toe combo discount."
+      },
+      {
+        "id": "bundle_carry_upgrade",
+        "name": "Carry Upgrade",
+        "discount_percent": 5,
+        "active": false,
+        "product_ids": [
+          "a2a5cffc-db36-4d2c-9ed0-a6d0a78ae3a8",
+          "e715bc27-d310-4384-b1ff-86d342ccd8ae"
+        ],
+        "product_a_id": "a2a5cffc-db36-4d2c-9ed0-a6d0a78ae3a8",
+        "product_b_id": "e715bc27-d310-4384-b1ff-86d342ccd8ae",
+        "recommendation_reason": "Add a Utility Crossbody Sling and Essential Street Cap for a 5% accessory upgrade."
       }
     ],
     "growth_rules": [
