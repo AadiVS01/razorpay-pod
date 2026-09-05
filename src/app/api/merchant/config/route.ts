@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getMerchantConfig, saveMerchantConfig, getPolicyVersions, getActivePolicyVersion, rollbackToVersion } from "@/lib/merchant-config";
 import { getAdminSupabase, supabasePublic } from "@/lib/supabase";
+import { getAuditEvents } from "@/lib/audit-ledger";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
     const config = getMerchantConfig();
-    const versions = getPolicyVersions();
+    const events = await getAuditEvents();
+    const versions = getPolicyVersions(events);
     const activeVersion = getActivePolicyVersion();
     return NextResponse.json({
       status: "success",
@@ -32,12 +34,13 @@ export async function POST(request: NextRequest) {
     if (rollback_version) {
       try {
         const restoredSnapshot = rollbackToVersion(rollback_version);
+        const events = await getAuditEvents();
         return NextResponse.json({
           status: "success",
           message: `Successfully rolled back to policy version ${rollback_version}. New active version: ${restoredSnapshot.version}`,
           active_version: restoredSnapshot.version,
           config: getMerchantConfig(),
-          versions: getPolicyVersions()
+          versions: getPolicyVersions(events)
         }, { status: 200 });
       } catch (rollbackErr: any) {
         return NextResponse.json(
@@ -118,11 +121,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const events = await getAuditEvents();
     return NextResponse.json({
       status: "success",
       message: "Merchant configuration and products updated successfully.",
       active_version: savedVersion.version,
-      versions: getPolicyVersions()
+      versions: getPolicyVersions(events)
     }, { status: 200 });
 
   } catch (err: any) {

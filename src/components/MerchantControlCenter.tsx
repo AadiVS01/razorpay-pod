@@ -104,8 +104,8 @@ export const MerchantControlCenter: React.FC = () => {
   const [blockedActions, setBlockedActions] = useState(0);
   const [totalBuyerSavings, setTotalBuyerSavings] = useState(0);
   const [incrementalRevenue, setIncrementalRevenue] = useState(0);
-  const [bundleConversionRate, setBundleConversionRate] = useState(38);
-  const [recoveryConversionRate, setRecoveryConversionRate] = useState(67);
+  const [bundleConversionRate, setBundleConversionRate] = useState(0);
+  const [recoveryConversionRate, setRecoveryConversionRate] = useState(0);
   const [ledgerEvents, setLedgerEvents] = useState<AuditEvent[]>([]);
   const [journeys, setJourneys] = useState<AgentJourney[]>([]);
 
@@ -188,11 +188,33 @@ export const MerchantControlCenter: React.FC = () => {
           return acc + (cur.arithmetic?.incremental_revenue || 0);
         }, 0);
 
+        // Compute Growth Conversion dynamically
+        const growthOrdersCount = completed.filter((e: any) => 
+          (e.matched_rules && e.matched_rules.length > 0) || 
+          (e.arithmetic?.incremental_revenue && e.arithmetic.incremental_revenue > 0) ||
+          (e.amount_before && e.amount_after && e.amount_before > e.amount_after)
+        ).length;
+        const dynamicGrowthRate = completed.length > 0 
+          ? Math.min(100, Math.round((growthOrdersCount / completed.length) * 100)) 
+          : 0;
+
+        // Compute Payment Recovery dynamically
+        const paymentFailures = events.filter((e: any) => e.action === "PAYMENT_FAILED" || e.reason_code === "PAYMENT_FAILED").length;
+        const paymentRecoveries = events.filter((e: any) => 
+          e.details?.toLowerCase().includes("recovery") || 
+          e.intent_summary?.toLowerCase().includes("recovery")
+        ).length;
+        const dynamicRecoveryRate = (paymentFailures + paymentRecoveries) > 0
+          ? Math.min(100, Math.round((paymentRecoveries / (paymentFailures + paymentRecoveries)) * 100))
+          : 0;
+
         setTodayRevenue(rev);
         setTodayOrders(completed.length);
         setBlockedActions(blocked);
         setTotalBuyerSavings(savings);
         setIncrementalRevenue(incRev);
+        setBundleConversionRate(dynamicGrowthRate);
+        setRecoveryConversionRate(dynamicRecoveryRate);
         setLedgerEvents(events);
         setJourneys(ledgerData.journeys || []);
       }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSupabase, supabasePublic } from "@/lib/supabase";
 import { appendAuditEvent } from "@/lib/audit-ledger";
+import Razorpay from "razorpay";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
     // Query order rows matching the razorpay_order_id
     const { data: orders, error } = await supabase
       .from("orders")
-      .select("razorpay_order_id, status, product_name, amount, created_at")
+      .select("razorpay_order_id, status, product_name, amount, created_at, admin_notes")
       .eq("razorpay_order_id", orderId);
 
     if (error || !orders || orders.length === 0) {
@@ -37,9 +38,50 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Consolidate status (if multiple items, check if any is paid/created)
-    const orderStatus = orders[0].status;
+    // Consolidate status
+    let orderStatus = orders[0].status;
     const totalAmountPaise = orders.reduce((sum: number, item: any) => sum + item.amount, 0);
+
+    // If order is not yet marked paid, verify directly with live Razorpay API
+    if (orderStatus !== "paid") {
+      let rzpIdToQuery = orderId;
+      if (orders[0].admin_notes && orders[0].admin_notes.includes("rzp_order_id:")) {
+        const match = orders[0].admin_notes.match(/rzp_order_id:([a-zA-Z0-9_]+)/);
+        if (match && match[1]) rzpIdToQuery = match[1];
+      }
+
+      const keyId = process.env.RAZORPAY_KEY_ID;
+      const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+      if (keyId && keySecret && rzpIdToQuery.startsWith("order_")) {
+        try {
+          const rzp = new Razorpay({ key_id: keyId, key_secret: keySecret });
+          const rzpOrder: any = await rzp.orders.fetch(rzpIdToQuery);
+          if (rzpOrder && (rzpOrder.status === "paid" || (rzpOrder.amount_paid && rzpOrder.amount_paid > 0))) {
+            orderStatus = "paid";
+            await supabase
+              .from("orders")
+              .update({ status: "paid" })
+              .eq("razorpay_order_id", orderId);
+
+            await appendAuditEvent({
+              actor: "Gateway",
+              action: "PAYMENT_CAPTURED",
+              order_id: orderId,
+              policy_result: "ALLOWED",
+              reason_code: "SUCCESS",
+              outcome: "COMPLETED",
+              amount_before: Math.round(totalAmountPaise / 100),
+              amount_after: Math.round(totalAmountPaise / 100),
+              details: `Live payment captured on Razorpay for order ${orderId} (${rzpIdToQuery}). Amount: ₹${Math.round(totalAmountPaise / 100)}.`
+            });
+            console.log(`✅ [PAYMENT] [SYNC] Live payment verified and captured for order ${orderId}.`);
+          }
+        } catch (rzpFetchErr) {
+          console.warn(`[STATUS] Could not verify order with Razorpay:`, rzpFetchErr);
+        }
+      }
+    }
 
     console.log(`🔍 [STATUS] Querying transaction status for order ${orderId}. Current status: ${orderStatus}`);
 

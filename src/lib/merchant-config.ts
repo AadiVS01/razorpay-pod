@@ -308,28 +308,63 @@ export function getMerchantConfig(): MerchantConfig {
 /**
  * Derives quote usage count per policy version from Trust Ledger without mutating version snapshots
  */
-export function getDerivedQuoteCounts(): Record<string, number> {
-  return {};
+export function getDerivedQuoteCounts(events?: any[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  if (!events || !Array.isArray(events)) return counts;
+
+  for (const event of events) {
+    if (event.action === "QUOTE_ISSUED" && event.policy_result === "ALLOWED") {
+      const ver = (event.policy_version || "v1").toLowerCase();
+      // Match exact version or normalized tag
+      counts[ver] = (counts[ver] || 0) + 1;
+    }
+  }
+  return counts;
 }
 
 /**
- * Retrieves all immutable policy version records paired with derived quote usage counts
+ * Derives order usage count per policy version from Trust Ledger
  */
-export function getPolicyVersions(): (PolicyVersionSnapshot & { quote_count: number })[] {
+export function getDerivedOrderCounts(events?: any[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  if (!events || !Array.isArray(events)) return counts;
+
+  for (const event of events) {
+    if (
+      (event.action === "ORDER_CREATED" || event.action === "PAYMENT_CAPTURED") &&
+      event.policy_result === "ALLOWED" &&
+      event.outcome === "COMPLETED"
+    ) {
+      const ver = (event.policy_version || "v1").toLowerCase();
+      counts[ver] = (counts[ver] || 0) + 1;
+    }
+  }
+  return counts;
+}
+
+/**
+ * Retrieves all immutable policy version records paired with derived quote and order usage counts
+ */
+export function getPolicyVersions(events?: any[]): (PolicyVersionSnapshot & { quote_count: number; order_count?: number })[] {
   try {
     ensureFilesExist();
     const data = fs.readFileSync(versionsPath, "utf-8");
     const versions: PolicyVersionSnapshot[] = JSON.parse(data);
-    const quoteCounts = getDerivedQuoteCounts();
+    const quoteCounts = getDerivedQuoteCounts(events);
+    const orderCounts = getDerivedOrderCounts(events);
 
-    return versions.map(v => ({
-      ...v,
-      growth_rules: v.growth_rules || DEFAULT_GROWTH_RULES,
-      quote_count: quoteCounts[v.version] || 0
-    }));
+    return versions.map(v => {
+      const verKey = v.version.toLowerCase();
+      return {
+        ...v,
+        growth_rules: v.growth_rules || DEFAULT_GROWTH_RULES,
+        quote_count: quoteCounts[verKey] || 0,
+        order_count: orderCounts[verKey] || 0,
+      };
+    });
   } catch (err) {
     console.error("❌ [POLICY_VERSION] Failed to read policy versions:", err);
-    return [{ ...INITIAL_VERSION, quote_count: 0 }];
+    return [{ ...INITIAL_VERSION, quote_count: 0, order_count: 0 }];
   }
 }
 
