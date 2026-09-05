@@ -102,6 +102,13 @@ export interface GrowthEvaluationResult {
     discount_paise: number;
     reason: string;
   }>;
+  excluded_rules?: Array<{
+    rule_id: string;
+    rule_name: string;
+    rule_type: string;
+    potential_discount_paise: number;
+    reason: string;
+  }>;
   free_items?: Array<{
     product_id: string;
     product_name: string;
@@ -175,6 +182,7 @@ export function evaluateGrowthRules(
   
   const activeRules = rules.filter(r => r.active);
   const appliedRules: GrowthEvaluationResult["applied_rules"] = [];
+  const excludedRules: NonNullable<GrowthEvaluationResult["excluded_rules"]> = [];
   const freeItems: NonNullable<GrowthEvaluationResult["free_items"]> = [];
   const crossSellRecs: NonNullable<GrowthEvaluationResult["cross_sell_recommendations"]> = [];
   
@@ -183,7 +191,7 @@ export function evaluateGrowthRules(
 
   for (const rule of activeRules) {
     // If a non-stackable rule is already applied and global stacking is restricted, skip further discounts
-    if (hasNonStackableApplied && !rule.stackable) {
+    if (hasNonStackableApplied && !rule.stackable && !globalPolicy?.promotion_stacking_allowed) {
       continue;
     }
 
@@ -351,9 +359,19 @@ export function evaluateGrowthRules(
     // Apply valid discount
     if (ruleDiscountPaise > 0) {
       // Check if this rule is non-stackable
-      if (!rule.stackable) {
+      if (!rule.stackable && !globalPolicy?.promotion_stacking_allowed) {
         // If we already have a discount and non-stackable rule is better, take the larger
         if (ruleDiscountPaise > totalDiscountPaise) {
+          // Push previous applied rules to excludedRules
+          for (const prev of appliedRules) {
+            excludedRules.push({
+              rule_id: prev.rule_id,
+              rule_name: prev.rule_name,
+              rule_type: prev.rule_type,
+              potential_discount_paise: prev.discount_paise,
+              reason: `Non-stackable policy: Larger savings from "${rule.name}" took precedence.`
+            });
+          }
           totalDiscountPaise = ruleDiscountPaise;
           appliedRules.length = 0; // replace previous
           appliedRules.push({
@@ -364,6 +382,14 @@ export function evaluateGrowthRules(
             reason: rule.recommendation_reason
           });
           hasNonStackableApplied = true;
+        } else {
+          excludedRules.push({
+            rule_id: rule.id,
+            rule_name: rule.name,
+            rule_type: rule.type,
+            potential_discount_paise: ruleDiscountPaise,
+            reason: `Non-stackable policy: Existing applied rule provides greater or equal savings.`
+          });
         }
       } else {
         totalDiscountPaise += ruleDiscountPaise;
@@ -388,6 +414,7 @@ export function evaluateGrowthRules(
     final_total_paise: finalTotalPaise,
     buyer_savings_paise: totalDiscountPaise,
     applied_rules: appliedRules,
+    excluded_rules: excludedRules,
     free_items: freeItems.length > 0 ? freeItems : undefined,
     cross_sell_recommendations: crossSellRecs.length > 0 ? crossSellRecs : undefined,
     items

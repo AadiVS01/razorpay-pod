@@ -161,7 +161,13 @@ export async function calculateCartPricing(input: CartPricingInput): Promise<Car
     reason: r.reason,
   }));
 
-  const excludedRules: ExcludedRuleDetail[] = [];
+  const excludedRules: ExcludedRuleDetail[] = (growthResult.excluded_rules || []).map((r) => ({
+    rule_id: r.rule_id,
+    rule_name: r.rule_name,
+    rule_type: r.rule_type,
+    potential_discount_paise: r.potential_discount_paise,
+    reason: r.reason,
+  }));
   let negotiationApplied = false;
 
   // 3. Evaluate Negotiated Bid if provided

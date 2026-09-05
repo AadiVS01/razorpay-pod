@@ -65,6 +65,73 @@ export async function GET(request: Request) {
                           }
                         }
                       },
+                      policy_version: { type: "string", description: "Active merchant policy version snapshot" },
+                      active_growth_rules: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            id: { type: "string" },
+                            name: { type: "string" },
+                            type: { type: "string" },
+                            description: { type: "string" },
+                            discount_percent: { type: "number" },
+                            discount_amount_paise: { type: "integer" },
+                            buy_quantity: { type: "integer" },
+                            free_quantity: { type: "integer" },
+                            quantity_tiers: {
+                              type: "array",
+                              items: {
+                                type: "object",
+                                properties: {
+                                  min_quantity: { type: "integer" },
+                                  discount_percent: { type: "number" }
+                                }
+                              }
+                            },
+                            product_ids: { type: "array", items: { type: "string" } },
+                            trigger_product_ids: { type: "array", items: { type: "string" } },
+                            reward_product_ids: { type: "array", items: { type: "string" } },
+                            buyer_eligibility: { type: "string" },
+                            min_cart_value_paise: { type: "integer" },
+                            reorder_interval_days: { type: "integer" },
+                            max_discount_paise: { type: "integer" },
+                            margin_floor_percent: { type: "number" },
+                            max_redemptions_per_order: { type: "integer" },
+                            stackable: { type: "boolean" },
+                            active: { type: "boolean" },
+                            recommendation_reason: { type: "string" }
+                          }
+                        }
+                      },
+                      active_bundles: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            id: { type: "string" },
+                            name: { type: "string" },
+                            discount_percent: { type: "number" },
+                            active: { type: "boolean" },
+                            product_ids: { type: "array", items: { type: "string" } },
+                            product_a_id: { type: "string" },
+                            product_b_id: { type: "string" },
+                            recommendation_reason: { type: "string" }
+                          }
+                        }
+                      },
+                      promotions: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            id: { type: "string" },
+                            name: { type: "string" },
+                            type: { type: "string" },
+                            recommendation_reason: { type: "string" }
+                          }
+                        }
+                      },
                       merchant_capability_manifest: {
                         type: "object",
                         properties: {
@@ -72,6 +139,19 @@ export async function GET(request: Request) {
                           max_autonomous_cap_paise: { type: "integer" },
                           quote_ttl_seconds: { type: "integer" },
                           mandate_required: { type: "boolean" },
+                          active_bundles: {
+                            type: "array",
+                            items: {
+                              type: "object",
+                              properties: {
+                                id: { type: "string" },
+                                name: { type: "string" },
+                                discount_percent: { type: "number" },
+                                active: { type: "boolean" },
+                                product_ids: { type: "array", items: { type: "string" } }
+                              }
+                            }
+                          },
                           active_growth_rules: {
                             type: "array",
                             items: {
@@ -80,9 +160,15 @@ export async function GET(request: Request) {
                                 id: { type: "string" },
                                 name: { type: "string" },
                                 type: { type: "string" },
+                                description: { type: "string" },
                                 discount_percent: { type: "number" },
+                                discount_amount_paise: { type: "integer" },
+                                buy_quantity: { type: "integer" },
+                                free_quantity: { type: "integer" },
                                 product_ids: { type: "array", items: { type: "string" } },
-                                recommendation_reason: { type: "string" }
+                                recommendation_reason: { type: "string" },
+                                stackable: { type: "boolean" },
+                                active: { type: "boolean" }
                               }
                             }
                           }
@@ -107,14 +193,23 @@ export async function GET(request: Request) {
               "application/json": {
                 schema: {
                   type: "object",
-                  required: ["product_id", "bid_price_paise", "size"],
+                  required: ["product_id", "size"],
                   properties: {
                     product_id: { type: "string" },
                     bid_price_paise: { type: "integer" },
                     size: { type: "string" },
                     quantity: { type: "integer", default: 1 },
                     cart_id: { type: "string", default: "default_cart" },
-                    session_id: { type: "string" }
+                    session_id: { type: "string" },
+                    buyer_context: {
+                      type: "object",
+                      properties: {
+                        is_new_buyer: { type: "boolean" },
+                        completed_orders_count: { type: "integer" },
+                        has_failed_payment: { type: "boolean" },
+                        days_since_last_order: { type: "integer" }
+                      }
+                    }
                   }
                 }
               }
@@ -166,7 +261,25 @@ export async function GET(request: Request) {
                         }
                       },
                       paid_quantity: { type: "integer" },
-                      free_quantity: { type: "integer" }
+                      free_quantity: { type: "integer" },
+                      lines: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            product_id: { type: "string" },
+                            name: { type: "string" },
+                            unit_price_paise: { type: "integer" },
+                            quantity: { type: "integer" },
+                            paid_quantity: { type: "integer" },
+                            free_quantity: { type: "integer" },
+                            line_subtotal_paise: { type: "integer" },
+                            line_discount_paise: { type: "integer" },
+                            line_total_paise: { type: "integer" },
+                            size: { type: "string" }
+                          }
+                        }
+                      }
                     }
                   }
                 }

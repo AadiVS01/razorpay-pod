@@ -24,8 +24,12 @@ export async function POST(request: NextRequest) {
       size,
       quantity = 1,
       cart_id = "default_cart",
-      session_id = `sess_${Date.now()}`
+      session_id = `sess_${Date.now()}`,
+      buyer_context = {},
+      buyerContext = {}
     } = body || {};
+
+    const resolvedBuyerContext = { ...buyerContext, ...buyer_context };
 
     if (!product_id || !size) {
       return NextResponse.json(
@@ -185,6 +189,7 @@ export async function POST(request: NextRequest) {
     // 5. Calculate Full Authoritative Cart Pricing
     const pricing = await calculateCartPricing({
       items: [{ id: product_id, quantity: parsedQty, size }],
+      buyerContext: resolvedBuyerContext,
       cartId: cart_id,
       policyVersion: activeVersion,
       bidPricePaise: bid_price_paise,
@@ -222,8 +227,9 @@ export async function POST(request: NextRequest) {
       policy_result: "ALLOWED",
       reason_code: "SUCCESS",
       outcome: "COMPLETED",
-      details: `Generated cryptographically signed quote under policy ${activeVersion}. Total approved price: ₹${agreedInr} (Saved ₹${savingsInr}).`,
+      details: `Generated cryptographically signed quote under policy ${activeVersion}. Total approved price: ₹${agreedInr} (Saved ₹${savingsInr}). Applied Rules: ${pricing.applied_rules.map(r => r.rule_name).join(", ") || "None"}.`,
       intent_summary: `Buyer agent quoted price for ${product.name} (Qty: ${parsedQty}, Size: ${size})`,
+      matched_rules: pricing.applied_rules.map(r => r.rule_id),
       arithmetic: {
         subtotal: originalInr,
         discount: savingsInr,

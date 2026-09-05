@@ -489,6 +489,7 @@ export async function POST(request: NextRequest) {
         reason_code: "SUCCESS",
         outcome: "COMPLETED",
         details: `Autonomous order created successfully under policy ${currentPolicyVersion}. Total: ₹${Math.round(actualRzpTotal / 100)}. Growth Rules: ${pricing.applied_rules.map(r => r.rule_name).join(", ") || "Standard Base"}.`,
+        matched_rules: pricing.applied_rules.map(r => r.rule_id),
         gate_results: {
           "Autonomy Gate": "PASS",
           "Mandate Bound": "PASS",
@@ -547,6 +548,7 @@ export async function POST(request: NextRequest) {
       reason_code: "SUCCESS",
       outcome: "COMPLETED",
       details: `Razorpay order ${rzpOrder.id} created under policy ${currentPolicyVersion}. Total: ₹${Math.round(actualRzpTotal / 100)}. Growth Rules: ${pricing.applied_rules.map(r => r.rule_name).join(", ") || "Standard Base"}.`,
+      matched_rules: pricing.applied_rules.map(r => r.rule_id),
       gate_results: {
         "Autonomy Gate": "PASS",
         "Mandate Bound": "PASS",

@@ -51,6 +51,42 @@ export interface AgentProductItem {
   };
 }
 
+export interface ActiveBundle {
+  id: string;
+  name: string;
+  discount_percent: number;
+  product_ids?: string[];
+  product_a_id?: string;
+  product_b_id?: string;
+  recommendation_reason?: string;
+  active?: boolean;
+}
+
+export interface ActiveGrowthRule {
+  id: string;
+  name: string;
+  type: string;
+  description?: string;
+  product_ids: string[];
+  trigger_product_ids?: string[];
+  reward_product_ids?: string[];
+  discount_percent?: number;
+  discount_amount_paise?: number;
+  buy_quantity?: number;
+  free_quantity?: number;
+  quantity_tiers?: Array<{ min_quantity: number; discount_percent: number }>;
+  min_cart_value_paise?: number;
+  reorder_interval_days?: number;
+  buyer_eligibility?: string;
+  max_discount_paise?: number;
+  margin_floor_percent?: number;
+  max_redemptions_per_order?: number;
+  stackable: boolean;
+  active: boolean;
+  recommendation_reason: string;
+  created_at?: string;
+}
+
 export interface MerchantCapabilityManifest {
   manifest_type: "protocol-shaped merchant capability manifest";
   policy_version: string;
@@ -75,33 +111,15 @@ export interface MerchantCapabilityManifest {
   promotion_stacking_allowed?: boolean;
   max_recommendations_per_interaction?: number;
   recovery_retry_limit?: number;
-  active_bundles: {
-    id: string;
-    name: string;
-    discount_percent: number;
-    product_ids?: string[];
-    product_a_id?: string;
-    product_b_id?: string;
-    recommendation_reason?: string;
-  }[];
-  active_growth_rules?: Array<{
-    id: string;
-    name: string;
-    type: string;
-    product_ids: string[];
-    discount_percent?: number;
-    discount_amount_paise?: number;
-    buy_quantity?: number;
-    free_quantity?: number;
-    recommendation_reason: string;
-    stackable: boolean;
-  }>;
+  active_bundles: ActiveBundle[];
+  active_growth_rules?: ActiveGrowthRule[];
 }
 
 export interface AgentCatalogResponse {
   status: "success" | "error";
   version?: string;
   protocol_version?: string;
+  policy_version?: string;
   generated_at?: string;
   timestamp?: string;
   store: {
@@ -118,6 +136,9 @@ export interface AgentCatalogResponse {
     };
   };
   merchant_capability_manifest: MerchantCapabilityManifest;
+  active_growth_rules?: ActiveGrowthRule[];
+  active_bundles?: ActiveBundle[];
+  promotions?: ActiveGrowthRule[];
   filters_applied?: {
     category?: string;
     max_price_inr?: number;

@@ -262,6 +262,7 @@ export async function getAgentCatalog(filters?: CatalogFilterParams): Promise<Ag
       id: b.id,
       name: b.name,
       discount_percent: b.discount_percent,
+      active: true,
       product_ids: b.product_ids || [b.product_a_id, b.product_b_id].filter(Boolean) as string[],
       product_a_id: b.product_a_id || (b.product_ids ? b.product_ids[0] : ""),
       product_b_id: b.product_b_id || (b.product_ids ? b.product_ids[1] : ""),
@@ -271,19 +272,35 @@ export async function getAgentCatalog(filters?: CatalogFilterParams): Promise<Ag
       id: r.id,
       name: r.name,
       type: r.type,
+      description: r.description,
       product_ids: r.product_ids,
+      trigger_product_ids: r.trigger_product_ids,
+      reward_product_ids: r.reward_product_ids,
       discount_percent: r.discount_percent,
       discount_amount_paise: r.discount_amount_paise,
       buy_quantity: r.buy_quantity,
       free_quantity: r.free_quantity,
+      quantity_tiers: r.quantity_tiers,
+      min_cart_value_paise: r.min_cart_value_paise,
+      reorder_interval_days: r.reorder_interval_days,
+      buyer_eligibility: r.buyer_eligibility,
+      max_discount_paise: r.max_discount_paise,
+      margin_floor_percent: r.margin_floor_percent,
+      max_redemptions_per_order: r.max_redemptions_per_order,
       recommendation_reason: r.recommendation_reason,
-      stackable: r.stackable
+      stackable: r.stackable,
+      active: true,
+      created_at: r.created_at
     }))
   };
+
+  const activeGrowthRules = manifest.active_growth_rules || [];
+  const activeBundles = manifest.active_bundles;
 
   return {
     status: "success",
     version: "2026-08-20",
+    policy_version: activeVersion,
     generated_at: new Date().toISOString(),
     store: {
       name: "ZeroClick",
@@ -296,6 +313,9 @@ export async function getAgentCatalog(filters?: CatalogFilterParams): Promise<Ag
       }
     },
     merchant_capability_manifest: manifest,
+    active_growth_rules: activeGrowthRules,
+    active_bundles: activeBundles,
+    promotions: activeGrowthRules,
     products: agentProducts,
     autonomous_checkout: {
       endpoint: "/api/razorpay/order",
