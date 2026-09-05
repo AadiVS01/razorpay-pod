@@ -169,10 +169,12 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
         </div>
       ) : filteredProducts.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-12 w-full">
-          {filteredProducts.map((product) => (
+          {filteredProducts.map((product, idx) => (
             <ProductCard
               key={product.id || product.slug}
               product={product}
+              index={idx}
+              priority={idx === 0}
               onInspectJson={(agentItem) => setInspectedProduct(agentItem)}
             />
           ))}

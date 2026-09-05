@@ -4,15 +4,19 @@ import React, { useState } from "react";
 import { Product, AgentProductItem } from "@/types/catalog";
 import { transformProductForAgent, getAllProductImages } from "@/lib/catalog-service";
 import { formatCurrency } from "@/lib/utils";
-import { Tag, Sparkles, Box, Check, Copy } from "lucide-react";
+import { Tag, Sparkles, Box, Check, Copy, ImageOff } from "lucide-react";
 
 interface ProductCardProps {
   product: Product;
+  index?: number;
+  priority?: boolean;
   onInspectJson?: (agentProduct: AgentProductItem) => void;
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({
   product,
+  index = 0,
+  priority = false,
   onInspectJson,
 }) => {
   const agentProduct = transformProductForAgent(product);
@@ -24,6 +28,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     product.sizes && product.sizes.length > 0 ? product.sizes[0] : "OS"
   );
   const [copiedSku, setCopiedSku] = useState(false);
+  const [imageError, setImageError] = useState(false);
+
+  const isEager = priority || index === 0;
 
   // Get active display images based on selected color
   let displayImages: string[] = [];
@@ -32,6 +39,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   } else {
     displayImages = getAllProductImages(product);
   }
+
+  const primaryImageSrc = displayImages.length > 0 ? displayImages[0] : agentProduct.image_url;
 
   const isOutOfStock = product.stock <= 0;
   const isSale = product.compare_price && product.compare_price > product.price;
@@ -53,12 +62,23 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         <div className="absolute inset-0 bg-foreground/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10 pointer-events-none" />
 
         {/* Primary Image & Alternate on hover */}
-        {displayImages && displayImages.length > 0 ? (
+        {imageError ? (
+          <div className="w-full h-full flex flex-col items-center justify-center p-4 bg-muted/70 text-center font-mono border-2 border-dashed border-border/80">
+            <ImageOff className="w-6 h-6 text-muted-foreground mb-2 opacity-70" />
+            <span className="text-xs font-bold text-foreground uppercase tracking-wider line-clamp-1">
+              {product.name}
+            </span>
+            <span className="text-[10px] text-muted-foreground mt-1.5 break-all select-all font-mono opacity-80 max-w-full px-2">
+              {agentProduct.image_url}
+            </span>
+          </div>
+        ) : primaryImageSrc ? (
           <>
             <img
-              src={displayImages[0]}
+              src={primaryImageSrc}
               alt={product.name}
-              onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/placeholder.svg'; }}
+              loading={isEager ? "eager" : "lazy"}
+              onError={() => setImageError(true)}
               className={`object-cover w-full h-full transform transition-all duration-700 ease-out group-hover:scale-105 ${
                 displayImages.length > 1 ? "group-hover:opacity-0 absolute inset-0" : ""
               }`}
@@ -67,7 +87,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               <img
                 src={displayImages[1]}
                 alt={`${product.name} alternate view`}
-                onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/placeholder.svg'; }}
+                loading="lazy"
+                onError={() => {}}
                 className="object-cover w-full h-full transform transition-all duration-700 ease-out opacity-0 group-hover:opacity-100 group-hover:scale-105"
               />
             )}

@@ -28,6 +28,7 @@ export interface AgentProductItem {
   sku: string;
   slug: string;
   name: string;
+  description: string;
   category: string;
   price_inr: number;
   price_paise: number;
@@ -39,6 +40,7 @@ export interface AgentProductItem {
   in_stock: boolean;
   image_url: string;
   images: string[];
+  image?: string;
   color_images?: Record<string, string[]>;
   ai_summary: string;
   bundle_offers: BundleOffer[];
