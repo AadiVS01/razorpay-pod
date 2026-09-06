@@ -153,6 +153,7 @@ export interface AgentCatalogResponse {
     quote_endpoint: string;
     currency: string;
     max_recommended_single_cart_inr: number;
+    bundle_quote_instruction?: string;
     notes: string;
   };
   autonomous_checkout?: {
